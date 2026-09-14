@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+
+# Environment/secrets
+.env
+
+# macOS
+.DS_Store
+
+# Debug data
+debug/
+# Packaging/build artifacts
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.coverage
+
+# Railway local link
+.railway/
