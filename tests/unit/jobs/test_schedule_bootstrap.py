@@ -25,7 +25,10 @@ def test_default_schedules_cover_shared_production_pipeline_without_account_spec
         "catalog-lorcast-daily",
     }
     assert definitions["playhub-discover-upcoming"].kind == PLAYHUB_DISCOVER_WINDOW
-    assert definitions["playhub-discover-upcoming"].payload["start_date"] == "$scheduled_date"
+    discovery = definitions["playhub-discover-upcoming"]
+    assert discovery.payload["anchor_date"] == "$scheduled_date"
+    assert discovery.payload["lookback_days"] == 30
+    assert discovery.payload["lookahead_days"] == 30
     assert definitions["playhub-import-sweep"].kind == PLAYHUB_IMPORT_SWEEP
     assert definitions["playhub-import-sweep"].payload["generation"] == "$scheduled_at"
     assert definitions["ratings-global-daily"].kind == RATINGS_BUILD_PUBLISH

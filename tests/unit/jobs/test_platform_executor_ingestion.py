@@ -19,6 +19,49 @@ def bare_executor():
     executor.analyzer_registry = None
     return executor
 
+def test_discover_window_supports_past_and_future_overlap(monkeypatch):
+    calls = []
+
+    class Client:
+        def close(self):
+            calls.append(("closed",))
+
+    class Service:
+        def sync_range(self, start, end, *, force):
+            calls.append((start, end, force))
+            return type(
+                "Result",
+                (),
+                {
+                    "events_received": 0,
+                    "unique_events": 0,
+                    "persisted_events": 0,
+                    "skipped": False,
+                },
+            )()
+
+    monkeypatch.setattr(executor_module, "PlayHubClient", Client)
+
+    monkeypatch.setattr(
+        executor_module.PlayHubDiscoveryService,
+        "from_engine",
+        classmethod(lambda cls, engine, *, client=None: Service()),
+    )
+
+    result = bare_executor()._discover_window(
+        {
+            "anchor_date": "2026-09-14",
+            "lookback_days": 30,
+            "lookahead_days": 30,
+            "chunk_days": 7,
+            "force": False,
+        }
+    )
+
+    assert result["start_date"] == "2026-08-15"
+    assert result["end_date_exclusive"] == "2026-10-15"
+
+    assert calls[-1] == ("closed",)
 
 def test_discover_window_chunks_range_and_aggregates(monkeypatch):
     calls = []

@@ -99,7 +99,11 @@ class PlatformJobExecutor:
 
     def _discover_window(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            start_day = date.fromisoformat(str(payload["start_date"]))
+            anchor_value = payload.get("anchor_date", payload.get("start_date"))
+            if anchor_value is None:
+                raise KeyError("anchor_date")
+            anchor_day = date.fromisoformat(str(anchor_value))
+            lookback_days = int(payload.get("lookback_days", 0))
             lookahead_days = int(payload.get("lookahead_days", 180))
             chunk_days = int(payload.get("chunk_days", 7))
             force = bool(payload.get("force", True))
@@ -107,12 +111,18 @@ class PlatformJobExecutor:
             raise PermanentJobError(
                 "playhub.discover_window requires start_date and integer window settings"
             ) from error
+
+        if not 0 <= lookback_days <= 366:
+            raise PermanentJobError(
+                "playhub.discover_window lookback_days must be between 0 and 366"
+            )
         if not 0 <= lookahead_days <= 366:
             raise PermanentJobError("playhub.discover_window lookahead_days must be between 0 and 366")
         if not 1 <= chunk_days <= 31:
             raise PermanentJobError("playhub.discover_window chunk_days must be between 1 and 31")
 
-        end_exclusive = start_day + timedelta(days=lookahead_days + 1)
+        start_day = anchor_day - timedelta(days=lookback_days)
+        end_exclusive = anchor_day + timedelta(days=lookahead_days + 1)
         client = PlayHubClient()
         totals = {
             "windows": 0,

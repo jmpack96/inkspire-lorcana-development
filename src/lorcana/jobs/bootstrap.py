@@ -45,7 +45,8 @@ def default_platform_schedules() -> tuple[ScheduleDefinition, ...]:
             kind=PLAYHUB_DISCOVER_WINDOW,
             schedule_spec={"type": "daily", "hour": 2, "minute": 0, "timezone": "UTC"},
             payload={
-                "start_date": "$scheduled_date",
+                "anchor_date": "$scheduled_date",
+                "lookback_days": 30,
                 "lookahead_days": 30,
                 "chunk_days": 7,
                 "force": False,

@@ -21,6 +21,28 @@ def event(event_id, start="2026-09-13T12:00:00Z"):
         "store": {"id": f"store-{event_id}", "name": "Store"},
     }
 
+def test_rediscovery_does_not_downgrade_existing_complete_event():
+    run_id = UUID("00000000-0000-0000-0000-000000000105")
+    repository = FakeRepository()
+
+    # This event was already fully imported before today's discovery.
+    repository.sync[1] = "complete"
+
+    client = FakeClient([event(1)])
+
+    result = make_service(
+        client,
+        repository,
+        run_id,
+    ).sync_day(date(2026, 9, 13), force=True)
+
+    assert result.persisted_events == 1
+
+    # Discovery may see/update the event again...
+    assert 1 in repository.events
+
+    # ...but must never reset our ingestion state.
+    assert repository.sync[1] == "complete"
 
 def test_discovery_window_dedupes_and_excludes_inclusive_end_boundary():
     selection = select_discovered_events(
