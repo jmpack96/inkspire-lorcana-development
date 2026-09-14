@@ -30,6 +30,9 @@ class FakeRepository:
             "input_count": 10,
             "player_count": 3,
             "ordered_input_digest": "abc",
+            "parameters": {"starting_rating": 1500.0, "k_factor": 32.0},
+            "exclusion_counts": {"event_not_complete": 2},
+            "future_repository_column": "ignored",
         }
 
     def leaderboard(self, _connection, run_id, *, limit, offset):
@@ -66,6 +69,8 @@ def test_leaderboard_resolves_one_publication_then_uses_exact_run():
     result = RatingQueryService(repository=repo, connection_factory=connection).leaderboard(limit=10, offset=5)
     assert result.publication.rating_run_id == RUN_ID
     assert result.entries[0].player_id == 11
+    assert result.publication.parameters["k_factor"] == 32.0
+    assert result.publication.exclusion_counts == {"event_not_complete": 2}
     assert repo.calls == [
         ("resolve", "global_elo"),
         ("leaderboard", RUN_ID, 10, 5),

@@ -87,7 +87,7 @@ class TeamQueryService:
             publication_row = self.rating_repository.resolve_publication(connection, publication_name)
             if publication_row is None:
                 raise RatingPublicationNotFound(f"No published rating run named {publication_name!r}")
-            publication = PublishedRatingRun(**dict(publication_row))
+            publication = PublishedRatingRun.from_mapping(publication_row)
             player_ids = [m.playhub_player_id for m in members if m.playhub_player_id is not None]
             current_rows = self.rating_repository.current_for_players(
                 connection, publication.rating_run_id, player_ids

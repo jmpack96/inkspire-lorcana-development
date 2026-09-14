@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import ContextManager
+from typing import Any, ContextManager, Mapping
 from collections.abc import Callable
 from uuid import UUID
 
@@ -32,6 +32,31 @@ class PublishedRatingRun:
     player_count: int
     ordered_input_digest: str
     previous_rating_run_id: UUID | None = None
+    parameters: Mapping[str, Any] = field(default_factory=dict)
+    exclusion_counts: Mapping[str, int] = field(default_factory=dict)
+
+    @classmethod
+    def from_mapping(cls, row: Mapping[str, Any]) -> "PublishedRatingRun":
+        """Build the public read model from a repository row.
+
+        Keep this conversion explicit so repository queries can grow additional
+        provenance columns without breaking every consumer that constructs this
+        dataclass.
+        """
+        return cls(
+            publication_name=row["publication_name"],
+            rating_run_id=row["rating_run_id"],
+            published_at=row["published_at"],
+            algorithm=row["algorithm"],
+            algorithm_version=row["algorithm_version"],
+            policy_version=row["policy_version"],
+            input_count=row["input_count"],
+            player_count=row["player_count"],
+            ordered_input_digest=row["ordered_input_digest"],
+            previous_rating_run_id=row.get("previous_rating_run_id"),
+            parameters=dict(row.get("parameters") or {}),
+            exclusion_counts=dict(row.get("exclusion_counts") or {}),
+        )
 
 
 @dataclass(frozen=True)
@@ -307,4 +332,4 @@ class RatingQueryService:
         row = self.repository.resolve_publication(connection, publication_name)
         if row is None:
             raise RatingPublicationNotFound(f"No published rating run named {publication_name!r}")
-        return PublishedRatingRun(**dict(row))
+        return PublishedRatingRun.from_mapping(row)
