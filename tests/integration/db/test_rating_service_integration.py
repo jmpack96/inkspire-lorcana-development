@@ -90,7 +90,7 @@ def test_build_validate_publish_and_query_one_immutable_run(db_engine):
         leaderboard = query.leaderboard(limit=3)
         assert leaderboard.publication.rating_run_id == result.rating_run_id
         assert len(leaderboard.entries) == 3
-        assert leaderboard.entries[0].display_name == "Cara"
+        assert leaderboard.entries[0].display_name == "Alice"
         assert query.player_by_id(1).player is not None
     finally:
         _clear(db_engine)
