@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lorcana-platform"
+version = "0.2.0"
+description = "Lorcana tournament data, ratings, Discord, and coaching platform"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "SQLAlchemy>=2.0,<3",
+    "alembic>=1.13,<2",
+    "psycopg[binary]>=3.2,<4",
+    "requests>=2.31,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+]
+bot = [
+    "discord.py>=2.4,<3",
+]
+
+[project.scripts]
+lorcana = "lorcana.interfaces.cli:main"
+lorcana-bot = "lorcana.interfaces.discord.bot:main"
+lorcana-worker = "lorcana.jobs.worker:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["lorcana*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+addopts = "-ra"
+markers = [
+    "integration: requires a dedicated PostgreSQL test database",
+]

@@ -1,0 +1,40 @@
+{
+  "source": {
+    "description": "lorcana-pre-parser-fix-20260913T205901Z.db",
+    "sha256": "cac0950afc84844fcb8367e00f93e4fe2f5b31f5a51fc2458aba02775a619069",
+    "source_match_rows": 515646
+  },
+  "legacy_parity_v1": {
+    "included_matches": 477438,
+    "players": 48035,
+    "calculator_invalid_matches": 0,
+    "exclusion_counts": {
+      "bye": 36897,
+      "ghost_match": 5,
+      "match_not_complete": 51,
+      "not_two_player": 1255
+    },
+    "ordered_input_digest": "f02339fbd385b250af996885fc816707c1aa977620f12bb4dc565447565b3ecf",
+    "final_state_digest": "0e7412859e42b67fe089e9a9f6c41b92d8c51e054524d96f9bd5634dcad4e846"
+  },
+  "global_elo_v1": {
+    "included_matches": 477334,
+    "players": 48033,
+    "calculator_invalid_matches": 0,
+    "exclusion_counts": {
+      "bye": 36897,
+      "event_not_complete": 104,
+      "ghost_match": 5,
+      "match_not_complete": 51,
+      "not_two_player": 1255
+    },
+    "ordered_input_digest": "90b3f2ff2f0138b997c57fb806bd0b164d8596997424dbcfcd45b4e1120664de",
+    "final_state_digest": "acea970f022dc669090c750b714b0725b230a545ce9b1c0a5781b1be74dc5a4f"
+  },
+  "verification": {
+    "legacy_oracle_processed_matches": 477438,
+    "legacy_oracle_history_rows": 954876,
+    "legacy_oracle_final_state_digest": "0e7412859e42b67fe089e9a9f6c41b92d8c51e054524d96f9bd5634dcad4e846",
+    "note": "The full frozen legacy arithmetic oracle and the new EloCalculator produced the same final-state digest."
+  }
+}
