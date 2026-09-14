@@ -1,4 +1,4 @@
-name: Verify and Deploy
+name: Verify
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: lorcana-${{ github.ref }}
+  group: lorcana-verify-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -44,10 +44,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -66,67 +66,3 @@ jobs:
           alembic upgrade head
           alembic downgrade base
           alembic upgrade head
-
-  deploy-worker:
-    name: Deploy worker to Railway
-    needs: verify
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: production
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install Railway CLI
-        run: npm install --global @railway/cli
-
-      - name: Deploy worker
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
-          RAILWAY_ENVIRONMENT: ${{ secrets.RAILWAY_ENVIRONMENT }}
-          RAILWAY_WORKER_SERVICE: ${{ secrets.RAILWAY_WORKER_SERVICE }}
-        run: >-
-          railway up --ci
-          --project "$RAILWAY_PROJECT_ID"
-          --environment "$RAILWAY_ENVIRONMENT"
-          --service "$RAILWAY_WORKER_SERVICE"
-
-  deploy-bot:
-    name: Deploy bot to Railway
-    needs: deploy-worker
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: production
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install Railway CLI
-        run: npm install --global @railway/cli
-
-      - name: Deploy bot
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
-          RAILWAY_ENVIRONMENT: ${{ secrets.RAILWAY_ENVIRONMENT }}
-          RAILWAY_BOT_SERVICE: ${{ secrets.RAILWAY_BOT_SERVICE }}
-        run: >-
-          railway up --ci
-          --project "$RAILWAY_PROJECT_ID"
-          --environment "$RAILWAY_ENVIRONMENT"
-          --service "$RAILWAY_BOT_SERVICE"
