@@ -37,6 +37,11 @@ def test_default_schedules_cover_shared_production_pipeline_without_account_spec
     assert definitions["maintenance-prune-jobs"].payload["retention_days"] == 30
     assert all(not item.kind.startswith("duels.") for item in definitions.values())
 
+    import_sweep = definitions["playhub-import-sweep"]
+
+    assert import_sweep.payload["lookback_days"] == 90
+    assert import_sweep.payload["retry_minutes"] == 180
+
 
 def test_duels_schedule_is_connection_scoped_and_contains_no_secret(monkeypatch):
     connection_id = UUID("00000000-0000-0000-0000-000000000777")

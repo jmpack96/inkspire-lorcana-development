@@ -60,7 +60,7 @@ def default_platform_schedules() -> tuple[ScheduleDefinition, ...]:
             kind=PLAYHUB_IMPORT_SWEEP,
             schedule_spec={"type": "interval", "seconds": 2 * 60 * 60},
             payload={
-                "lookback_days": 14,
+                "lookback_days": 90,
                 "retry_minutes": 180,
                 "limit": 500,
                 "generation": "$scheduled_at",

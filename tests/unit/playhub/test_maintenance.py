@@ -23,6 +23,22 @@ class Repository:
 def reader():
     yield object()
 
+def test_maintenance_service_supports_long_recovery_window():
+    repository = Repository()
+    service = PlayHubMaintenanceService(
+        repository=repository,
+        read_connection_factory=reader,
+        clock=lambda: NOW,
+    )
+
+    service.due_event_import_ids(
+        lookback_days=90,
+        retry_minutes=180,
+        limit=500,
+    )
+
+    assert repository.values["lookback_start"] == NOW - timedelta(days=90)
+    assert repository.values["retry_before"] == NOW - timedelta(minutes=180)
 
 def test_maintenance_service_derives_retry_cutoffs_from_one_clock_value():
     repository = Repository()
