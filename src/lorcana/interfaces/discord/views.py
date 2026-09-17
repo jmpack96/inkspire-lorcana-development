@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from lorcana.playhub.query_service import DatabaseStatus, SetChampionshipEvent
-from lorcana.ratings.query_service import PlayerProfile, PlayerSearchResult, PublishedLeaderboard
+from lorcana.ratings.query_service import PlayerProfile, PlayerSearchResult, PublishedLeaderboard, PlayerHistory, PlayerHistoryMatch
 from lorcana.teams.query_service import TeamLeaderboard
 
 
@@ -24,6 +24,144 @@ class EmbedSpec:
     fields: tuple[EmbedField, ...] = field(default_factory=tuple)
     footer: str | None = None
 
+
+def _truncate(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    return value[:limit - 3] + "..."
+
+
+def _player_history_match_field(match: PlayerHistoryMatch) -> EmbedField:
+    result = {
+        "WIN": "W",
+        "LOSS": "L",
+        "DRAW": "D",
+        "BYE": "BYE",
+        "UNKNOWN": "?",
+    }.get(match.result, match.result)
+
+    round_name = (
+        f"R{match.round_number}"
+        if match.round_number is not None
+        else "Match"
+    )
+
+    if match.phase_name:
+        round_name = f"{match.phase_name} {round_name}"
+
+    if match.result == "BYE":
+        opponent = "Bye"
+    elif (
+        match.opponent_id is None
+        and match.opponent_name is None
+        and match.opponent_username is None
+    ):
+        opponent = "Unknown opponent"
+    else:
+        opponent = _player_name(
+            match.opponent_name,
+            match.opponent_username,
+            match.opponent_id or 0,
+        )
+
+    parts = [opponent]
+
+    if match.player_score is not None and match.opponent_score is not None:
+        parts.append(f"Score: {match.player_score}-{match.opponent_score}")
+
+    if match.intentional_draw:
+        parts.append("Intentional draw")
+
+    if match.rated:
+        parts.append("`Elo`")
+
+    return EmbedField(
+        name=_truncate(f"{round_name} — {result}", 256),
+        value=_truncate(" • ".join(parts), 1024),
+        inline=False,
+    )
+
+
+def player_history_views(history: PlayerHistory) -> tuple[EmbedSpec, ...]:
+    player_name = (
+        history.username
+        or history.display_name
+        or f"Player {history.player_id}"
+    )
+
+    if not history.events:
+        return (
+            EmbedSpec(
+                title=f"{player_name} — Player History",
+                description=(
+                    f"**Play Hub ID:** `{history.player_id}`\n"
+                    "No recorded Play Hub matches were found."
+                ),
+                footer=(
+                    f"{history.publication.policy_version} • "
+                    f"run {history.publication.rating_run_id}"
+                ),
+            ),
+        )
+
+    pages: list[EmbedSpec] = []
+
+    for event in history.events:
+        match_chunks = [
+            event.matches[index:index + 20]
+            for index in range(0, len(event.matches), 20)
+        ] or [()]
+
+        for chunk_number, matches in enumerate(match_chunks, start=1):
+            elo_text = (
+                f"✅ {event.rated_matches} match"
+                f"{'' if event.rated_matches == 1 else 'es'} in current Elo"
+                if event.rated_matches
+                else "❌ No matches in current published Elo"
+            )
+
+            description = (
+                f"**Date:** {_discord_timestamp(event.start_datetime, 'D')}\n"
+                f"**Record:** {_record(event.wins, event.losses, event.draws)}\n"
+                f"**Elo:** {elo_text}"
+            )
+
+            if event.placement is not None:
+                description += f"\n**Placement:** #{event.placement}"
+
+            if event.event_format:
+                description += f"\n**Format:** {event.event_format}"
+
+            if event.source_url:
+                description += f"\n[View event]({event.source_url})"
+
+            continuation = (
+                f" — {chunk_number}/{len(match_chunks)}"
+                if len(match_chunks) > 1
+                else ""
+            )
+
+            pages.append(
+                EmbedSpec(
+                    title=_truncate(
+                        f"{player_name} — {event.event_name}{continuation}",
+                        256,
+                    ),
+                    description=description,
+                    fields=tuple(
+                        _player_history_match_field(match)
+                        for match in matches
+                    ),
+                    footer=(
+                        f"{len(history.events)} events • "
+                        f"{history.total_matches} match records • "
+                        f"{history.rated_matches} currently rated • "
+                        f"{history.publication.policy_version}"
+                    ),
+                )
+            )
+
+    return tuple(pages)
 
 def _discord_timestamp(value: datetime | None, style: str = "F") -> str:
     if value is None:

@@ -18,6 +18,7 @@ from lorcana.interfaces.discord.views import (
     player_search_view,
     set_championship_views,
     team_leaderboard_view,
+    player_history_views,
 )
 from lorcana.coach.request_service import CoachRequestError, CoachRequestService
 from lorcana.coach.service import CoachService
@@ -81,6 +82,33 @@ class DiscordApplication:
                 ephemeral=True,
             )
         return DiscordResponse(embeds=(player_profile_view(profile),))
+
+    def player_history(self, query: str) -> DiscordResponse:
+        matches = self.ratings.search_players(query)
+
+        if not matches:
+            return DiscordResponse(
+                content=f"No player found matching `{query}`.",
+                ephemeral=True,
+            )
+
+        if len(matches) > 1:
+            return DiscordResponse(
+                embeds=(player_search_view(query, matches),),
+                ephemeral=True,
+            )
+
+        history = self.ratings.player_history(matches[0].player_id)
+
+        if history is None:
+            return DiscordResponse(
+                content="That player's history could not be loaded.",
+                ephemeral=True,
+            )
+
+        return DiscordResponse(
+            embeds=player_history_views(history)
+        )
 
     def leaderboard(self, *, minimum_matches: int = 20, limit: int = 25) -> DiscordResponse:
         data = self.ratings.competitive_leaderboard(

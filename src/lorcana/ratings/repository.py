@@ -17,6 +17,7 @@ from lorcana.db.schema.playhub import (
     playhub_matches,
     playhub_phases,
     playhub_players,
+    playhub_registrations,
     playhub_rounds,
 )
 from lorcana.db.schema.ratings import (
@@ -523,6 +524,119 @@ class RatingRepository:
             )
         ).scalar_one()
         return int(total), int(above), int(below)
+
+    def player_tournament_history(
+        self,
+        connection: Connection,
+        rating_run_id: UUID,
+        player_id: int,
+    ):
+        opponent = playhub_players.alias("history_opponent")
+        registration = playhub_registrations.alias("history_registration")
+        run_input = rating_run_inputs.alias("history_rating_input")
+
+        opponent_id = case(
+            (
+                playhub_matches.c.player1_id == player_id,
+                playhub_matches.c.player2_id,
+            ),
+            else_=playhub_matches.c.player1_id,
+        )
+
+        player_score = case(
+            (
+                playhub_matches.c.player1_id == player_id,
+                playhub_matches.c.player1_score,
+            ),
+            else_=playhub_matches.c.player2_score,
+        )
+
+        opponent_score = case(
+            (
+                playhub_matches.c.player1_id == player_id,
+                playhub_matches.c.player2_score,
+            ),
+            else_=playhub_matches.c.player1_score,
+        )
+
+        statement = (
+            select(
+                playhub_events.c.event_id,
+                playhub_events.c.name.label("event_name"),
+                playhub_events.c.start_datetime,
+                playhub_events.c.format.label("event_format"),
+                playhub_events.c.source_url,
+
+                registration.c.matches_won,
+                registration.c.matches_lost,
+                registration.c.matches_drawn,
+                registration.c.placement,
+
+                playhub_matches.c.match_id,
+                playhub_matches.c.winner_id,
+                playhub_matches.c.is_draw,
+                playhub_matches.c.is_intentional_draw,
+                playhub_matches.c.is_bye,
+
+                player_score.label("player_score"),
+                opponent_score.label("opponent_score"),
+
+                playhub_rounds.c.round_number,
+                playhub_phases.c.phase_name,
+
+                opponent_id.label("opponent_id"),
+                opponent.c.display_name.label("opponent_name"),
+                opponent.c.username.label("opponent_username"),
+
+                run_input.c.match_id.is_not(None).label("rated"),
+            )
+            .select_from(
+                playhub_matches
+                .join(
+                    playhub_events,
+                    playhub_events.c.event_id == playhub_matches.c.event_id,
+                )
+                .outerjoin(
+                    playhub_rounds,
+                    playhub_rounds.c.round_id == playhub_matches.c.round_id,
+                )
+                .outerjoin(
+                    playhub_phases,
+                    playhub_phases.c.phase_id == playhub_rounds.c.phase_id,
+                )
+                .outerjoin(
+                    registration,
+                    and_(
+                        registration.c.event_id == playhub_matches.c.event_id,
+                        registration.c.player_id == player_id,
+                    ),
+                )
+                .outerjoin(
+                    opponent,
+                    opponent.c.player_id == opponent_id,
+                )
+                .outerjoin(
+                    run_input,
+                    and_(
+                        run_input.c.rating_run_id == rating_run_id,
+                        run_input.c.match_id == playhub_matches.c.match_id,
+                    ),
+                )
+            )
+            .where(
+                (playhub_matches.c.player1_id == player_id)
+                | (playhub_matches.c.player2_id == player_id)
+            )
+            .order_by(
+                playhub_events.c.start_datetime.desc().nulls_last(),
+                playhub_events.c.event_id.desc(),
+                func.coalesce(playhub_phases.c.phase_order, 0),
+                func.coalesce(playhub_rounds.c.round_number, 0),
+                playhub_matches.c.match_id,
+            )
+        )
+
+        return connection.execute(statement).mappings().all()
 
     def player_history(self, connection: Connection, rating_run_id: UUID, player_id: int):
         return connection.execute(

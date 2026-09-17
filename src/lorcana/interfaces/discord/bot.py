@@ -117,6 +117,23 @@ def create_bot(resources: ApplicationResources):
     async def player(interaction: discord.Interaction, query: str) -> None:
         await execute(interaction, application.player, query)
 
+    @bot.tree.command(
+        name="playerhistory",
+        description="Show a Lorcana player's tournament and match history.",
+    )
+    @app_commands.describe(
+        query="Play Hub name, username, or player ID"
+    )
+    async def playerhistory(
+        interaction: discord.Interaction,
+        query: str,
+    ) -> None:
+        await execute(
+            interaction,
+            application.player_history,
+            query,
+        )
+
     @bot.tree.command(name="leaderboard", description="Show the global Lorcana Elo leaderboard.")
     @app_commands.describe(
         minimum_matches="Minimum rated matches required to appear on the leaderboard.",

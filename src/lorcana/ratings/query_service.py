@@ -139,6 +139,54 @@ class PlayerProfile:
     performance_vs_expected: float | None = None
     best_win: BestWin | None = None
 
+@dataclass(frozen=True)
+class PlayerHistoryMatch:
+    match_id: int
+    round_number: int | None
+    phase_name: str | None
+    opponent_id: int | None
+    opponent_name: str | None
+    opponent_username: str | None
+    result: str
+    player_score: int | None
+    opponent_score: int | None
+    rated: bool
+    intentional_draw: bool = False
+
+
+@dataclass(frozen=True)
+class PlayerHistoryEvent:
+    event_id: int
+    event_name: str
+    start_datetime: datetime | None
+    event_format: str | None
+    source_url: str | None
+    wins: int
+    losses: int
+    draws: int
+    placement: int | None
+    matches: tuple[PlayerHistoryMatch, ...]
+
+    @property
+    def rated_matches(self) -> int:
+        return sum(match.rated for match in self.matches)
+
+
+@dataclass(frozen=True)
+class PlayerHistory:
+    publication: PublishedRatingRun
+    player_id: int
+    display_name: str | None
+    username: str | None
+    events: tuple[PlayerHistoryEvent, ...]
+
+    @property
+    def total_matches(self) -> int:
+        return sum(len(event.matches) for event in self.events)
+
+    @property
+    def rated_matches(self) -> int:
+        return sum(event.rated_matches for event in self.events)
 
 def _record(rows) -> RecordSummary:
     results = [row["result"] for row in rows]
@@ -148,6 +196,16 @@ def _record(rows) -> RecordSummary:
         draws=results.count("DRAW"),
     )
 
+def _history_result(row, player_id: int) -> str:
+    if row["is_bye"]:
+        return "BYE"
+    if row["is_draw"]:
+        return "DRAW"
+    if row["winner_id"] == player_id:
+        return "WIN"
+    if row["winner_id"] is not None:
+        return "LOSS"
+    return "UNKNOWN"
 
 class RatingQueryService:
     """Resolve a publication once, then query only that immutable run."""
@@ -165,6 +223,90 @@ class RatingQueryService:
     ) -> "RatingQueryService":
         return cls(repository=repository or RatingRepository(), connection_factory=engine.connect)
 
+    def player_history(
+        self,
+        player_id: int,
+        *,
+        publication_name: str = "global_elo",
+    ) -> PlayerHistory | None:
+        with self.connection_factory() as connection:
+            publication = self._resolve(connection, publication_name)
+
+            source = self.repository.source_player(connection, player_id)
+            if source is None:
+                return None
+
+            rows = self.repository.player_tournament_history(
+                connection,
+                publication.rating_run_id,
+                player_id,
+            )
+
+        grouped: dict[int, list[Mapping[str, Any]]] = {}
+
+        for row in rows:
+            grouped.setdefault(row["event_id"], []).append(row)
+
+        events: list[PlayerHistoryEvent] = []
+
+        for event_rows in grouped.values():
+            first = event_rows[0]
+
+            matches = tuple(
+                PlayerHistoryMatch(
+                    match_id=row["match_id"],
+                    round_number=row["round_number"],
+                    phase_name=row["phase_name"],
+                    opponent_id=row["opponent_id"],
+                    opponent_name=row["opponent_name"],
+                    opponent_username=row["opponent_username"],
+                    result=_history_result(row, player_id),
+                    player_score=row["player_score"],
+                    opponent_score=row["opponent_score"],
+                    rated=bool(row["rated"]),
+                    intentional_draw=bool(row["is_intentional_draw"]),
+                )
+                for row in event_rows
+            )
+
+            derived_wins = sum(match.result == "WIN" for match in matches)
+            derived_losses = sum(match.result == "LOSS" for match in matches)
+            derived_draws = sum(match.result == "DRAW" for match in matches)
+
+            events.append(
+                PlayerHistoryEvent(
+                    event_id=first["event_id"],
+                    event_name=first["event_name"] or f"Event {first['event_id']}",
+                    start_datetime=first["start_datetime"],
+                    event_format=first["event_format"],
+                    source_url=first["source_url"],
+                    wins=(
+                        first["matches_won"]
+                        if first["matches_won"] is not None
+                        else derived_wins
+                    ),
+                    losses=(
+                        first["matches_lost"]
+                        if first["matches_lost"] is not None
+                        else derived_losses
+                    ),
+                    draws=(
+                        first["matches_drawn"]
+                        if first["matches_drawn"] is not None
+                        else derived_draws
+                    ),
+                    placement=first["placement"],
+                    matches=matches,
+                )
+            )
+
+        return PlayerHistory(
+            publication=publication,
+            player_id=source["player_id"],
+            display_name=source["display_name"],
+            username=source["username"],
+            events=tuple(events),
+        )
     def leaderboard(
         self,
         *,
