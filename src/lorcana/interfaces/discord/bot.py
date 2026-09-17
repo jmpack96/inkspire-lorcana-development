@@ -43,19 +43,88 @@ def _to_discord_embed(discord: Any, spec: EmbedSpec):
     return embed
 
 
-async def _send_response(interaction: Any, discord: Any, response: DiscordResponse) -> None:
+async def _send_response(
+    interaction: Any,
+    discord: Any,
+    response: DiscordResponse,
+) -> None:
     embeds = [_to_discord_embed(discord, spec) for spec in response.embeds]
+
     if not embeds:
-        await interaction.followup.send(response.content, ephemeral=response.ephemeral)
+        await interaction.followup.send(
+            response.content,
+            ephemeral=response.ephemeral,
+        )
         return
 
-    # Multiple embed pages are sent individually so commands such as /setchamps
-    # never approach Discord's aggregate embed payload limits.
+    if len(embeds) == 1:
+        await interaction.followup.send(
+            content=response.content,
+            embed=embeds[0],
+            ephemeral=response.ephemeral,
+        )
+        return
+
+    # Add page numbers without changing the pure EmbedSpec presentation model.
     for index, embed in enumerate(embeds):
-        kwargs = {"embed": embed, "ephemeral": response.ephemeral}
-        if index == 0 and response.content is not None:
-            kwargs["content"] = response.content
-        await interaction.followup.send(**kwargs)
+        existing_footer = embed.footer.text if embed.footer else None
+        page_text = f"Page {index + 1}/{len(embeds)}"
+
+        if existing_footer:
+            embed.set_footer(text=f"{existing_footer} • {page_text}")
+        else:
+            embed.set_footer(text=page_text)
+
+    class EmbedPaginator(discord.ui.View):
+        def __init__(self) -> None:
+            super().__init__(timeout=300)
+            self.index = 0
+            self._sync_buttons()
+
+        def _sync_buttons(self) -> None:
+            self.previous.disabled = self.index == 0
+            self.next.disabled = self.index == len(embeds) - 1
+
+        @discord.ui.button(
+            label="Previous",
+            style=discord.ButtonStyle.secondary,
+        )
+        async def previous(
+            self,
+            button_interaction: discord.Interaction,
+            button: discord.ui.Button,
+        ) -> None:
+            self.index -= 1
+            self._sync_buttons()
+
+            await button_interaction.response.edit_message(
+                embed=embeds[self.index],
+                view=self,
+            )
+
+        @discord.ui.button(
+            label="Next",
+            style=discord.ButtonStyle.secondary,
+        )
+        async def next(
+            self,
+            button_interaction: discord.Interaction,
+            button: discord.ui.Button,
+        ) -> None:
+            self.index += 1
+            self._sync_buttons()
+
+            await button_interaction.response.edit_message(
+                embed=embeds[self.index],
+                view=self,
+            )
+
+    await interaction.followup.send(
+        content=response.content,
+        embed=embeds[0],
+        view=EmbedPaginator(),
+        ephemeral=response.ephemeral,
+    )
 
 
 def create_bot(resources: ApplicationResources):
