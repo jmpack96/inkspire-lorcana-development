@@ -39,6 +39,9 @@ def completed_payload():
         "summary": "Good recovery after an early sequencing loss.",
         "findings": [
             {
+                "claim_basis": "strategic_inference",
+                "rule_citations": [],
+                "card_citations": [],
                 "category": "sequencing",
                 "impact": "medium",
                 "confidence": 0.92,
@@ -68,7 +71,7 @@ def test_openai_analyzer_uses_private_strict_structured_response_request():
         session=session,
     )
 
-    result = analyzer.analyze({"normalization": {"effective_actions": [{"seq": 4}]}})
+    result = analyzer.analyze(grounded_evidence())
 
     assert result.summary.startswith("Good recovery")
     assert result.findings[0].evidence_action_ids == (4,)
@@ -97,7 +100,7 @@ def test_openai_analyzer_retries_429_then_succeeds():
         sleeper=sleeps.append,
     )
 
-    result = analyzer.analyze({"x": 1})
+    result = analyzer.analyze(grounded_evidence())
 
     assert result.findings[0].category == "sequencing"
     assert len(session.calls) == 2
@@ -113,7 +116,7 @@ def test_openai_analyzer_does_not_retry_non_transient_4xx_or_echo_body():
     )
 
     with pytest.raises(OpenAIAnalyzerError, match=r"OpenAI HTTP 400") as caught:
-        analyzer.analyze({"x": 1})
+        analyzer.analyze(grounded_evidence())
 
     assert "sensitive provider body" not in str(caught.value)
     assert len(session.calls) == 1
@@ -128,7 +131,7 @@ def test_openai_analyzer_rejects_refusal_and_invalid_json():
         api_key="secret", model="gpt-test", session=FakeSession([FakeResponse(200, refusal)])
     )
     with pytest.raises(OpenAIAnalyzerError, match="refused"):
-        analyzer.analyze({"x": 1})
+        analyzer.analyze(grounded_evidence())
 
     invalid = {
         "status": "completed",
@@ -138,7 +141,7 @@ def test_openai_analyzer_rejects_refusal_and_invalid_json():
         api_key="secret", model="gpt-test", session=FakeSession([FakeResponse(200, invalid)])
     )
     with pytest.raises(OpenAIAnalyzerError, match="valid JSON"):
-        analyzer.analyze({"x": 1})
+        analyzer.analyze(grounded_evidence())
 
 
 def test_openai_analyzer_close_only_closes_owned_session(monkeypatch):
@@ -156,3 +159,32 @@ def test_openai_analyzer_close_only_closes_owned_session(monkeypatch):
     analyzer = OpenAIResponsesCoachAnalyzer(api_key="secret", model="gpt-test", session=injected)
     analyzer.close()
     assert injected.closed is False
+
+
+def grounded_evidence():
+    return {"normalization": {"effective_actions": [{"seq": 4}]},
+            "rules": {"status": "available", "citations": {"CR:test:p1": {"text": "test"}}},
+            "catalog": {"facts": {}, "missing_card_ids": []}}
+
+
+def test_missing_rules_or_cards_blocks_before_network_request():
+    session = FakeSession([])
+    analyzer = OpenAIResponsesCoachAnalyzer(api_key="secret", model="test", session=session)
+    with pytest.raises(OpenAIAnalyzerError, match="rules reference"):
+        analyzer.analyze({})
+    evidence = grounded_evidence()
+    evidence["catalog"]["missing_card_ids"] = ["3-223"]
+    with pytest.raises(OpenAIAnalyzerError, match="missing card"):
+        analyzer.analyze(evidence)
+    assert session.calls == []
+
+
+def test_model_cannot_publish_invented_rule_citation():
+    payload = completed_payload()
+    value = json.loads(payload["output"][0]["content"][0]["text"])
+    value["findings"][0]["rule_citations"] = ["CR:fake:p999"]
+    payload["output"][0]["content"][0]["text"] = json.dumps(value)
+    analyzer = OpenAIResponsesCoachAnalyzer(api_key="secret", model="test",
+        session=FakeSession([FakeResponse(200, payload)]))
+    with pytest.raises(OpenAIAnalyzerError, match="unavailable rule"):
+        analyzer.analyze(grounded_evidence())

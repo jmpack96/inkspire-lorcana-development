@@ -35,7 +35,7 @@ _BASE_ACTION_KEYS = (
 )
 
 _IDENTITY_CARD_KEYS = ("id", "card_id", "name", "card_name")
-_FIELD_CARD_KEYS = _IDENTITY_CARD_KEYS + ("type", "exerted", "damage", "just_played", "cards_under")
+_FIELD_CARD_KEYS = _IDENTITY_CARD_KEYS + ("instance_id", "type", "strength", "willpower", "lore", "exerted", "damage", "just_played", "cards_under")
 _INKWELL_CARD_KEYS = _IDENTITY_CARD_KEYS + ("exerted", "hidden")
 
 _CONTEXT_SCALARS = ("lore", "hand_count", "deck_count", "ink_count", "ready_ink")

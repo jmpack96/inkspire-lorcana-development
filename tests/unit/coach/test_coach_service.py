@@ -328,3 +328,36 @@ def test_retry_can_recover_a_run_left_running_by_a_crashed_worker():
     assert recovered.analysis_run_id == RUN
     assert repo.runs[RUN]["status"] == "succeeded"
     assert analyzer.calls == 1
+
+
+def test_service_resolves_reviewed_alias_without_changing_replay():
+    class AliasRepository(FakeRepository):
+        def evidence(self, *args, **kwargs):
+            value = super().evidence(*args, **kwargs)
+            value["normalized"]["effective_actions"] = [{"seq": 1,
+                "card_id": "3-223", "card_name": "Piglet - Pooh Pirate Captain"}]
+            return value
+
+        def catalog_all_facts(self, _c, snapshot_id):
+            row = super().catalog_facts(_c, snapshot_id, ["12-11"])[0]
+            return [{**row, "card_id": "3-16", "name": "Piglet - Pooh Pirate Captain",
+                     "collector_number": "16", "ink_colors": ["amber"]}]
+
+    evidence = service(AliasRepository())._evidence_package(member_id=MEMBER,
+        normalization_id=NORMALIZATION, feature_set_id=FEATURES, catalog_snapshot_id=CATALOG,
+        decklist_id=None)
+    assert evidence["catalog"]["facts"]["3-223"]["canonical_card_id"] == "3-16"
+    assert evidence["catalog"]["missing_card_ids"] == []
+    assert evidence["normalization"]["effective_actions"][0]["card_id"] == "3-223"
+
+
+def test_grounding_preconditions_prevent_model_call_and_run_creation():
+    analyzer = FakeAnalyzer()
+    analyzer.requires_grounding = True
+    analyzer.rules_bundle = None
+    repo = FakeRepository()
+    with pytest.raises(CoachError):
+        service(repo).analyze(member_id=MEMBER, normalization_id=NORMALIZATION,
+            feature_set_id=FEATURES, catalog_snapshot_id=CATALOG, analyzer=analyzer)
+    assert analyzer.calls == 0
+    assert repo.runs == {}

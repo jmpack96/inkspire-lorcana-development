@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from lorcana.coach.openai_analyzer import OpenAIResponsesCoachAnalyzer
 from lorcana.coach.registry import AnalyzerRegistry
+from lorcana.coach.rules import load_bundle
 from lorcana.config import ConfigurationError, Settings
 
 
@@ -20,6 +21,7 @@ def build_analyzer_registry(settings: Settings) -> AnalyzerRegistry:
     model = settings.openai_coach_model
     registry.register(
         "openai",
-        lambda: OpenAIResponsesCoachAnalyzer(api_key=api_key, model=model),
+        lambda: OpenAIResponsesCoachAnalyzer(api_key=api_key, model=model,
+            rules_bundle=load_bundle(settings.coach_rules_bundle)),
     )
     return registry
