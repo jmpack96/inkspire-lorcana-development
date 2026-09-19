@@ -25,7 +25,8 @@ def test_compaction_preserves_citable_actions_and_removes_redundant_parser_bagga
 
     original_bytes = len(json.dumps(original, separators=(",", ":")).encode())
     compact_bytes = len(json.dumps(compact, separators=(",", ":")).encode())
-    assert compact_bytes < original_bytes * 0.60
+    # Retain combat stats and instance identity even when they increase input size.
+    assert compact_bytes < original_bytes * 0.70
 
 
 def test_compaction_never_invents_opponent_hidden_hand():
@@ -42,3 +43,10 @@ def test_compaction_never_invents_opponent_hidden_hand():
     assert compact["context"]["my"]["hand"][0]["id"] == "1-1"
     assert "hand" not in compact["context"]["opponent"]
     assert compact["context"]["opponent"]["hand_count"] == 2
+
+
+def test_compaction_preserves_board_stats_for_rules_reasoning():
+    card = {"id": "3-16", "instance_id": "instance-1", "strength": 2, "willpower": 2, "lore": 1}
+    result = compact_effective_actions([{"seq": 1, "actor_is_perspective": True,
+        "coach_context": {"my": {"field": [card]}}}])
+    assert result[0]["context"]["my"]["field"][0] == card

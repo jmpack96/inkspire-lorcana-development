@@ -45,6 +45,7 @@ class Settings:
     discord_team_slug: str = "inkspire"
     coach_analyzer_name: str | None = None
     coach_analyzer_generation: str = "v1"
+    coach_rules_bundle: Path | None = None
     openai_api_key: str | None = field(default=None, repr=False)
     openai_coach_model: str = "gpt-5.6-terra"
 
@@ -81,7 +82,7 @@ class Settings:
         if not openai_coach_model:
             raise ConfigurationError("OPENAI_COACH_MODEL must not be empty")
         default_generation = (
-            f"{openai_coach_model}:lorcana_coach_v1"
+            f"{openai_coach_model}:lorcana_coach_v2_grounded"
             if coach_analyzer_name == "openai" else "v1"
         )
         coach_analyzer_generation = source.get(
@@ -97,6 +98,7 @@ class Settings:
             discord_team_slug=discord_team_slug,
             coach_analyzer_name=coach_analyzer_name,
             coach_analyzer_generation=coach_analyzer_generation,
+            coach_rules_bundle=Path(source["LORCANA_COACH_RULES_BUNDLE"]) if source.get("LORCANA_COACH_RULES_BUNDLE") else None,
             openai_api_key=openai_api_key,
             openai_coach_model=openai_coach_model,
         )

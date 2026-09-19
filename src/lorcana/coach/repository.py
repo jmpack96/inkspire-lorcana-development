@@ -13,7 +13,7 @@ from sqlalchemy.engine import Connection
 
 from lorcana.db.schema.catalog import catalog_cards, catalog_snapshots
 from lorcana.db.schema.coach import coach_analysis_runs, coach_findings, coach_reports, decklist_cards, decklists
-from lorcana.db.schema.duels import duels_connections, duels_feature_sets, duels_normalizations, duels_replays
+from lorcana.db.schema.duels import duels_connections, duels_feature_sets, duels_normalizations, duels_replays, duels_games
 
 
 class CoachRepository:
@@ -69,10 +69,12 @@ class CoachRepository:
                 duels_feature_sets.c.features_sha256,
                 duels_replays.c.replay_id,
                 duels_replays.c.game_id,
+                duels_games.c.started_at.label("played_at"),
             )
             .select_from(
                 duels_normalizations
                 .join(duels_replays, duels_replays.c.replay_id == duels_normalizations.c.replay_id)
+                .join(duels_games, duels_games.c.game_id == duels_replays.c.game_id)
                 .join(duels_connections, duels_connections.c.connection_id == duels_replays.c.connection_id)
                 .join(
                     duels_feature_sets,
@@ -102,6 +104,11 @@ class CoachRepository:
                 catalog_cards.c.card_id.in_(ids),
             )
         ).mappings().all()
+
+    def catalog_all_facts(self, connection: Connection, snapshot_id: UUID):
+        return connection.execute(select(catalog_cards).where(
+            catalog_cards.c.snapshot_id == snapshot_id
+        )).mappings().all()
 
     def decklist(self, connection: Connection, member_id: UUID, decklist_id: UUID):
         deck = connection.execute(

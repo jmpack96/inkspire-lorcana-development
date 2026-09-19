@@ -98,3 +98,9 @@ def test_lorcast_rejects_permanent_http_and_bad_shapes():
     client = LorcastClient(session=Session([Response(200, {"unexpected": []})]), sleeper=lambda _: None)
     with pytest.raises(LorcastError, match="unexpected payload"):
         client.sets()
+
+
+def test_null_plural_inks_falls_back_to_single_ink():
+    from lorcana.catalog.lorcast import _colors
+    assert _colors({"inks": None, "ink": "Amber"}) == ["Amber"]
+    assert _colors({"inks": ["Amber", "Steel"], "ink": "Amber"}) == ["Amber", "Steel"]

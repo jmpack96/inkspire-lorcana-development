@@ -13,6 +13,8 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.engine import Connection, Engine
 
+from lorcana.catalog.resolver import RESOLVER_VERSION, card_stats, collect_names, resolve_printings
+from lorcana.coach.rules import for_game
 from lorcana.coach.analyzer import CoachAnalyzer
 from lorcana.coach.evidence import compact_effective_actions
 from lorcana.coach.repository import CoachRepository
@@ -67,7 +69,7 @@ def _collect_card_ids(value: Any, output: set[str]) -> None:
         output.add(value)
 
 
-def _render_report(summary: str, findings: tuple[CoachFindingDraft, ...]) -> str:
+def _render_report(summary: str, findings: tuple[CoachFindingDraft, ...], rules: dict | None = None) -> str:
     lines = ["# Lorcana Game Review", "", summary.strip()]
     if not findings:
         lines.extend(["", "## Findings", "", "No actionable findings were identified."])
@@ -88,6 +90,13 @@ def _render_report(summary: str, findings: tuple[CoachFindingDraft, ...]) -> str
             f"**Evidence:** {'; '.join(evidence)} · **Confidence:** {finding.confidence:.0%} · "
             f"**Type:** {finding.claim_type}"
         )
+        refs = finding.payload.get("rule_citations", [])
+        if refs:
+            citations = (rules or {}).get("citations", {})
+            url = (rules or {}).get("source_url")
+            links = [f"[{ref}]({url}#page={citations[ref]['page']})" if url and ref in citations else ref for ref in refs]
+            lines.append("**Rules references:** " + ", ".join(links))
+            lines.append("Rules interpretation is model-generated; citations are checked, legality is not mechanically verified.")
         lines.append("")
     return "\n".join(lines).rstrip()
 
@@ -209,10 +218,16 @@ class CoachService:
             for row in deck_cards:
                 card_ids.add(row["card_id"])
             fact_rows = self.repository.catalog_facts(connection, catalog_snapshot_id, card_ids)
+            names = collect_names([effective_actions, normalized.get("decklist") or [], deck_cards])
+            if card_ids - {row["card_id"] for row in fact_rows}:
+                fact_rows = self.repository.catalog_all_facts(connection, catalog_snapshot_id)
+            resolved, resolutions = resolve_printings(card_ids, names, fact_rows)
 
         facts = {
-            row["card_id"]: {
-                "card_id": row["card_id"],
+            replay_id: {
+                "card_id": replay_id,
+                "canonical_card_id": row["card_id"],
+                **card_stats(row),
                 "name": row["name"],
                 "version": row["version"],
                 "set_code": row["set_code"],
@@ -225,11 +240,12 @@ class CoachService:
                 "card_type": row["card_type"],
                 "rules_text": row["rules_text"],
             }
-            for row in fact_rows
+            for replay_id, row in resolved.items()
         }
         missing = sorted(card_ids - set(facts))
         return {
-            "evidence_schema_version": 1,
+            "evidence_schema_version": 2,
+            "played_at": evidence["played_at"].isoformat() if evidence.get("played_at") else None,
             "game_id": evidence["game_id"],
             "replay_id": str(evidence["replay_id"]),
             "normalization": {
@@ -256,6 +272,8 @@ class CoachService:
                 "source_version": snapshot["source_version"],
                 "facts": facts,
                 "missing_card_ids": missing,
+                "resolver_version": RESOLVER_VERSION,
+                "resolutions": resolutions,
                 "instruction": "Use catalog facts for card attributes. Do not infer missing card facts.",
             },
             "decklist": None if deck is None else {
@@ -296,6 +314,12 @@ class CoachService:
                 raise CoachError("Every finding must cite at least one action or turn")
             if any(action_id not in valid_action_ids for action_id in finding.evidence_action_ids):
                 raise CoachError("Finding cited an action that is not in effective replay evidence")
+            if "rules" in evidence:
+                from lorcana.coach.grounding import validate_finding_grounding
+                try:
+                    validate_finding_grounding(finding, evidence)
+                except ValueError as error:
+                    raise CoachError(str(error)) from error
             if any(turn not in valid_turns for turn in finding.evidence_turns):
                 raise CoachError("Finding cited a turn that is not in effective replay evidence")
 
@@ -318,7 +342,24 @@ class CoachService:
             catalog_snapshot_id=catalog_snapshot_id,
             decklist_id=decklist_id,
         )
+        if getattr(analyzer, "requires_grounding", False):
+            evidence["rules"] = for_game(analyzer.rules_bundle, evidence.get("played_at"))
+            if evidence["catalog"]["missing_card_ids"]:
+                raise CoachError("Unresolved card identities: " + ", ".join(evidence["catalog"]["missing_card_ids"]))
+            from lorcana.coach.grounding import incomplete_card_ids
+            incomplete = incomplete_card_ids(evidence["catalog"]["facts"])
+            if incomplete:
+                raise CoachError("Incomplete catalog facts; refresh or review cards: " + ", ".join(incomplete))
+            if evidence["rules"]["status"] != "available":
+                raise CoachError("Official rules reference unavailable for game date: " + evidence["rules"]["status"])
         config = dict(analysis_config or {})
+        if "rules" in evidence:
+            # Persist enough provenance to reproduce the reference and alias choices.
+            config["grounding"] = {
+                "rules": {k: v for k, v in evidence["rules"].items() if k != "citations"},
+                "resolver_version": RESOLVER_VERSION,
+                "resolutions": evidence["catalog"]["resolutions"],
+            }
         analyzer_input = {**evidence, "analysis_config": config}
         input_sha = canonical_sha256(analyzer_input)
         idempotency_key = canonical_sha256({
@@ -381,7 +422,7 @@ class CoachService:
         try:
             result = analyzer.analyze(analyzer_input)
             self._validate_analyzer_result(result, analyzer_input)
-            report_content = _render_report(result.summary, result.findings)
+            report_content = _render_report(result.summary, result.findings, analyzer_input.get("rules"))
             completed_at = self._now()
             finding_rows = []
             for ordinal, finding in enumerate(result.findings, start=1):

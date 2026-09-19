@@ -112,7 +112,9 @@ def _optional_text(value: Any) -> str | None:
 
 
 def _colors(raw: dict[str, Any]) -> list[str]:
-    value = raw.get("inks", raw.get("ink"))
+    value = raw.get("inks")
+    if value is None:
+        value = raw.get("ink")
     if value is None:
         return []
     if isinstance(value, str):
