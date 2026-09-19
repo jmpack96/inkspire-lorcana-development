@@ -353,14 +353,14 @@ class PlayHubRepository:
                 playhub_events.c.start_datetime >= lookback_start,
                 playhub_events.c.start_datetime <= now,
                 playhub_event_sync_state.c.state.in_(
-                    ["discovered", "partial", "no_results", "failed"]
+                    ["discovered", "pending", "partial", "no_results", "failed"]
                 ),
                 (
                     playhub_event_sync_state.c.last_attempt_at.is_(None)
                     | (playhub_event_sync_state.c.last_attempt_at <= retry_before)
                 ),
             )
-            .order_by(playhub_events.c.start_datetime, playhub_events.c.event_id)
+            .order_by(playhub_event_sync_state.c.last_attempt_at.asc().nullsfirst(),playhub_events.c.start_datetime,playhub_events.c.event_id,)
             .limit(limit)
         ).scalars().all()
         return tuple(int(value) for value in rows)

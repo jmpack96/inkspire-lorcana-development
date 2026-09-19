@@ -140,7 +140,7 @@ def player_history_views(
         for event in history.events
     ]
 
-    events_per_page = 15
+    events_per_page = 5
     pages = []
 
     for start in range(0, len(fields), events_per_page):

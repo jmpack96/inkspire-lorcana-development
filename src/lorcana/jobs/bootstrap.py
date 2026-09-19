@@ -62,7 +62,7 @@ def default_platform_schedules() -> tuple[ScheduleDefinition, ...]:
             payload={
                 "lookback_days": 90,
                 "retry_minutes": 180,
-                "limit": 500,
+                "limit": 5000,
                 "generation": "$scheduled_at",
             },
             resource_key="global",

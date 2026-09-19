@@ -71,8 +71,12 @@ def _optional_datetime(value: Any, *, field: str) -> datetime | None:
 def _colors(value: Any, *, field: str) -> list[str] | None:
     if value is None:
         return None
+    if isinstance(value, str):
+        value = value.split("/")
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise DuelsHistoryParseError(f"{field} must be a list of strings")
+        raise DuelsHistoryParseError(
+            f"{field} must be a slash-separated string or a list of strings"
+        )
     return [item.strip().lower() for item in value if item.strip()]
 
 
