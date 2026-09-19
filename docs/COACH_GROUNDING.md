@@ -1,101 +1,122 @@
-# Coach grounding: first implementation
+# Coach card and rules grounding
 
-This change addresses the observed Duels `3-223` printing mismatch and adds official-rule reference checks before paid analysis. It requires no database migration. It is not a full game-rules engine or a certification that model advice is correct.
+The coach resolves reviewed alternate printings, requires complete card facts, and cites official rules. It is not a deterministic legality engine. No database migration is needed.
 
-## What changes
+## Packaged references
 
-- Exact card IDs must agree with observed full names when available.
-- Reviewed aliases retain the Duels ID in replay evidence and resolve to a catalog gameplay entry. The initial reviewed alias is Piglet - Pooh Pirate Captain (`3-223`). Lorcast currently returns its standard printing as `3-16`.
-- Unknown IDs get candidate suggestions, not automatic name-based mappings. Conflicting candidate gameplay data blocks resolution. To add a verified printing, add an entry to `REVIEWED_ALIASES` in `src/lorcana/catalog/resolver.py`, record the review source, and add a regression case. Do not use base character names without subtitles.
-- The snapshot ID, resolver version, mapping decisions, and rules reference hash/metadata are recorded with the analysis. Original replays and catalog snapshots remain unchanged.
-- Lorcast single-ink fallback is corrected (`inks: null` falls back to `ink`). A fresh catalog import is needed to repair existing empty color fields.
-- Static catalog combat statistics and replay board statistics are exposed to the analyzer. Missing required statistics or colors block analysis.
-- Official rules are imported into a checksum-pinned local JSON bundle. The import verifies the PDF's version and effective date, preserves all page text, and refuses to overwrite an existing output file. Citations identify document version and PDF page.
-- OpenAI analysis requires a rules bundle covering the game's recorded start date and resolved, complete card facts. It does not silently apply July rules to earlier games.
-- Findings declare their basis and card/rule citations. Unknown citation IDs are rejected. Rules interpretations require both kinds of citation and must be labeled inference. Report citations link to the source PDF page.
-- Prompt generation advances to `lorcana_coach_v2_grounded`; existing reports remain historical records.
+`src/lorcana/coach/resources/rules-current.json` is committed with the application and included in its installed Python package. `load_bundle()` loads this resource independently of the working directory. Docker validates it during the build. No runtime download or manually created container file is required.
 
-## Apply the patch
+The bundle contains 182 PDF pages from seven official English documents linked on [Disney Lorcana's resources page](https://www.disneylorcana.com/en-US/resources), checked September 19, 2026:
 
-Work in a local clone of `jmpack96/inkspire-lorcana-development`, not a Railway container. The patch is based on commit `5010a3bb115a58a5e8dd0733ef3af8bd43edddb4`.
+- Comprehensive Rules 2.2.0, effective July 9, 2026 (55 pages).
+- Tournament Rules, effective July 14, 2026 (29 pages). The resources page update date is July 23; the effective date comes from the PDF.
+- Fabled set release notes (25 pages).
+- Whispers in the Well set release notes (16 pages).
+- Winterspell set release notes (7 pages).
+- Wilds Unknown set release notes (20 pages).
+- Attack of the Vine! set release notes (30 pages).
+
+Each document has its official source URL, source PDF SHA-256, title, kind, and review date. Citations identify the document and PDF page. The complete extracted bundle has a checksum. Fabled describes itself as the first set release notes; this bundle does not claim a separate guide exists for every earlier set. Complete errata and historical rules coverage are not claimed. Copyright remains with the source owners.
+
+## Historical games
+
+Replays remain reviewable before July 9, after the last review date, and when their date is unknown. The reference window now records provenance rather than blocking the game.
+
+Every grounded report displays a current-reference notice, including reports with no findings. Rules-dependent advice is framed as practice under the bundled references. The model is explicitly instructed not to call an old play illegal, treat a later rule change as a player mistake, or assume current catalog wording existed on the replay date. Predating the comprehensive rules, postdating the last review, and unknown dates receive explicit notices. Even a date inside the reference window is not a certification of historical legality.
+
+Set guides can describe superseded rules. The prompt requires consideration of that context and omission of claims when source conflicts cannot be resolved. Citation checks establish that references exist, not that the model used them correctly. Historical applicability and semantic conflict resolution are not mechanically verified.
+
+## Deploy this update
+
+If the previous packaged-rules patch has NOT been applied, apply `full-update.patch` to a local clone based on main commit `6fcdefd` (which includes the original grounding change):
 
 ```bash
-git switch -c coach/grounded-card-and-rules-references
-git apply --check /path/to/coach-grounding.patch
-git apply /path/to/coach-grounding.patch
+git switch -c coach/packaged-rules-and-set-guides
+git apply --check /path/to/full-update.patch
+git apply /path/to/full-update.patch
 python -m pip install -e '.[dev]'
 python -m pytest -q tests/unit
 git diff --check
 ```
 
-Review and commit the files, then push your branch and use your normal GitHub review/deployment flow. If `git apply --check` fails, stop and reconcile the newer source instead of overwriting files. No production configuration or data has been changed by preparing this patch.
+If you already applied the previous packaged-rules patch, apply `incremental-update.patch` instead. Do not apply both patches.
 
-## Prepare the rules reference after deployment
+Commit and push the branch, open a PR, and pass the PostgreSQL CI gate before merging/deploying. If patch checking fails, reconcile changes rather than forcing the patch.
 
-Official landing page: https://www.disneylorcana.com/en-US/resources
+On Railway, REMOVE `LORCANA_COACH_RULES_BUNDLE` from the worker (and any shared/service variables). Removing it selects the packaged default. An explicit override is still honored and fails clearly when missing or corrupt; it never silently falls back. Do not point it to the old `/data` or `/app/data` file.
 
-The English Comprehensive Rules linked there were version 2.2.0, effective July 9, 2026, when checked on September 19, 2026. A current rules document alone does not establish historical errata or set-ruling coverage.
+Set this on BOTH worker and Discord bot to avoid reusing old completed queue requests:
 
-In the worker shell, download that exact document to the persistent `/data` volume and check its bytes:
+```text
+LORCANA_COACH_ANALYZER_GENERATION=references-96e87dbe45da7c69
+```
+
+The model prompt version is `lorcana_coach_v4_tournament_references`. Existing OpenAI model/analyzer/key settings still apply. This update does not enable analysis or make paid calls.
+
+After deployment, verify the actual configuration in the worker:
 
 ```bash
 python - <<'PY'
-import hashlib
-from pathlib import Path
-import requests
-url = 'https://files.disneylorcana.com/Comprehensive-Rules_2.2.0-EN.pdf'
-response = requests.get(url, timeout=60)
-response.raise_for_status()
-expected = '5ffa31172fcaae2cbdbf127aebdd54987f01a4e72008812c96556c29d0942d8f'
-if hashlib.sha256(response.content).hexdigest() != expected:
-    raise SystemExit('Official PDF bytes changed: review the document before importing.')
-path = Path('/data/lorcana-rules-2.2.0.pdf')
-with path.open('xb') as handle:
-    handle.write(response.content)
-print(path)
+from lorcana.config import Settings
+from lorcana.coach.rules import load_bundle, for_game
+settings = Settings.from_env()
+bundle = load_bundle(settings.coach_rules_bundle)
+rules = for_game(bundle, '2026-05-10T11:50:48.595000+00:00')
+print('Documents:', len(bundle.get('documents', {})))
+print('Pages:', len(bundle['citations']))
+print('Status:', rules['status'])
+print('Date coverage:', rules['date_coverage'])
+print('Notice:', rules['review_notice'])
 PY
-
-python -m lorcana.coach.rules \
-  --pdf /data/lorcana-rules-2.2.0.pdf \
-  --version 2.2.0 \
-  --effective-from 2026-07-09 \
-  --verified-through 2026-09-19 \
-  --output /data/lorcana-rules-2.2.0-reviewed-2026-09-19.json
 ```
 
-`verified-through` is deliberately an operator-reviewed cutoff, not a prediction that the rules will remain unchanged. Recheck official rules, errata, and set notes before extending it. Retain old bundles. Replays outside the loaded date range are blocked until an applicable reference is configured; automatic multi-version selection is not included yet.
+Expected: seven documents, 182 pages, available, before_reference. Then repeat the actual replay evidence diagnostic using `load_bundle(resources.settings.coach_rules_bundle)`; no hardcoded path is needed.
 
-Set on the worker:
+## Card identity checks
 
-```text
-LORCANA_COACH_RULES_BUNDLE=/data/lorcana-rules-2.2.0-reviewed-2026-09-19.json
-```
+Exact IDs must agree with observed full names. Reviewed aliases retain replay IDs while supplying canonical gameplay facts. Piglet - Pooh Pirate Captain `3-223` resolves to `3-16`. Unknown printings get candidate suggestions but are not automatically mapped. Conflicting gameplay facts block resolution. Add verified printings in `REVIEWED_ALIASES` with review provenance and a regression case.
 
-When changing references or reviewed aliases, update `LORCANA_COACH_ANALYZER_GENERATION` on both worker and bot so the job queue does not reuse an older completed request. For this initial version, use:
+Incomplete card statistics or ink colors still block model analysis. If an older catalog has empty single-ink colors, refresh it with the corrected importer and use the new snapshot. No replay redownload is necessary. The existing audit on snapshot `650da9cd-b528-479d-bb30-c11050ace6fd` passed for the affected Piglet replay.
 
-```text
-LORCANA_COACH_ANALYZER_GENERATION=grounded-v2-rules-2.2.0-reviewed-2026-09-19
-```
+## Updating references
 
-The existing OpenAI analyzer/model/key configuration is still required when you enable analysis. Keep the API key in Railway secrets. This patch does not choose a model or make paid API calls.
+Run these commands in your LOCAL repository, not an ephemeral Railway shell. Install the project dependencies first (`python -m pip install -e '.[dev]'`).
 
-Refresh the catalog once with the corrected importer:
+Check for changes without writing a file:
 
 ```bash
-lorcana catalog-enqueue-refresh --generation grounded-v2-colors
+python -m lorcana.coach.reference_refresh
 ```
 
-Use a new snapshot after that job succeeds. No replay redownload is needed. Test one game with a known date in the supported range before onboarding teammates.
+The updater reads the official resources page, discovers English comprehensive rules, tournament rules and set-note PDFs, downloads them and compares their SHA-256 hashes and URLs against the packaged bundle. It catches new set notes, new URLs, and changed bytes at the same URL. It prints new, changed, unchanged and no-longer-listed documents. If the page layout is unrecognized, required categories are absent, or a download fails, it raises an error rather than reporting everything as current.
 
-## Validation and remaining work
+Prepare an updated bundle:
 
-206 unit tests and two subtests passed locally, including reviewed aliases, unknown-printing rejection, subtitle conflicts, ambiguous gameplay facts, missing card attributes, rule-date boundaries, tampered bundles, invented citation rejection, and no model call without references. The official PDF was downloaded, its cover/version/effective date checked, and all 55 pages extracted successfully. No paid API call or production database mutation was performed. Live PostgreSQL integration and deployment remain to be run in the project's CI/Railway environment.
+```bash
+python -m lorcana.coach.reference_refresh --output rules-next.json
+```
 
-Important limits:
+This never overwrites an existing output and does not activate anything. It prints a suggested analyzer generation derived from the bundle hash. `--baseline PATH` selects a different baseline. `--checked-on YYYY-MM-DD` overrides the source check date; the default is today's date and future dates are rejected.
 
-- Valid citations prove source existence, not relevance or correct interpretation. The model may still misclassify a claim, overlook an exception, or introduce unsupported prose. Human review remains necessary.
-- Only the Comprehensive Rules reference is loaded in this slice. Official set notes, errata, and historical versions need separate ingestion, conflict resolution, and coverage tests. The prompt instructs omission where these are required but absent; this is not mechanically enforceable yet.
-- No deterministic legality engine has been added. Resource costs, ability timing, continuous effects, alternative costs, and challenge legality need explicit, narrowly scoped validators with known-state prerequisites and `unknown` outcomes.
-- Rules are currently sent as the full document (about 190,000 characters), which increases model input cost. Retrieval can replace this later only with tests ensuring necessary exceptions are included.
-- Reviewed aliases live in source control for this small team. Unknown printings require review; no automatic guessing is used.
-- Replay parsing warnings and hidden information can still limit analysis quality. Passing this suite is not proof of strategic quality; a human-labeled replay evaluation set is the next quality gate.
+Review the printed changes and extracted text. The effective dates for comprehensive and tournament rules are taken from their PDF covers, not the landing-page update dates. An unrecognized cover format stops the build for review. Set notes have no invented effective date. Removed set guides are retained with `currently_listed: false`, keeping older card rulings available and making their status visible. Unchanged PDFs retain the previous extraction to avoid incidental font-extraction differences.
+
+To activate the reviewed update:
+
+```bash
+cp rules-next.json src/lorcana/coach/resources/rules-current.json
+python -m pytest -q tests/unit
+```
+
+Commit the bundle and deploy through the normal PR workflow. Update `LORCANA_COACH_ANALYZER_GENERATION` on both worker and Discord bot to the suggested value so old completed requests are not reused. Git preserves the prior bundle for rollback. A reference check date records source freshness, not proof of historical applicability or correct model interpretation.
+
+This is an on-demand updater. No scheduled job, automatic PR, or live document replacement is enabled. Activation stays tied to a reviewed deployment so sources cannot silently change underneath saved reports.
+
+## Tournament reference scope
+
+Tournament rules are available as a separate document kind with their own citations and effective date. The prompt distinguishes gameplay rules from tournament procedures. It requires tournament sources for claims about match procedure, takebacks, concessions/draws, deck legality or time limits, and does not assume that a Duels game was a sanctioned event. Missing format, event level, clock or agreement context means conditional guidance only. Penalties and judge remedies require the applicable correction policy, which is not bundled here. These are prompt-level safeguards, not a complete tournament policy engine.
+
+## Validation and limits
+
+216 unit tests and two subtests passed, including package loading from another directory, missing override errors, integrity checks, historical-date notices, document-specific report links, reviewed aliases, and citation validation. The installed wheel is checked separately for the packaged resource. Live PostgreSQL CI, Railway deployment and real model output still need validation.
+
+All extracted reference pages are sent to the model (about 350,000 characters), increasing input cost. No retrieval or scheduled automatic activation has been added. Human review is still needed for strategic quality, source interpretation, hidden information, parser limitations, historical card wording and unsupported claims. Those limits do not invalidate the replay's recorded observations.

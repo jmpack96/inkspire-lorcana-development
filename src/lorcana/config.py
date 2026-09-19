@@ -82,7 +82,7 @@ class Settings:
         if not openai_coach_model:
             raise ConfigurationError("OPENAI_COACH_MODEL must not be empty")
         default_generation = (
-            f"{openai_coach_model}:lorcana_coach_v2_grounded"
+            f"{openai_coach_model}:lorcana_coach_v4_tournament_references"
             if coach_analyzer_name == "openai" else "v1"
         )
         coach_analyzer_generation = source.get(

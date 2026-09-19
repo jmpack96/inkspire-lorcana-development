@@ -87,7 +87,7 @@ def test_openai_coach_settings_are_secret_safe_and_generation_tracks_model(tmp_p
     })
     assert settings.openai_api_key == "sk-super-secret"
     assert settings.openai_coach_model == "gpt-custom"
-    assert settings.coach_analyzer_generation == "gpt-custom:lorcana_coach_v2_grounded"
+    assert settings.coach_analyzer_generation == "gpt-custom:lorcana_coach_v4_tournament_references"
     assert "sk-super-secret" not in repr(settings)
 
     with pytest.raises(ConfigurationError, match="OPENAI_API_KEY"):

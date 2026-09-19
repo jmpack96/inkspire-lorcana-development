@@ -8,6 +8,7 @@ WORKDIR /app
 
 COPY . /app
 RUN python -m pip install --no-cache-dir '.[bot]' \
+    && python -c 'from lorcana.coach.rules import load_bundle; load_bundle()' \
     && useradd --create-home --uid 10001 lorcana \
     && chown -R lorcana:lorcana /app
 

@@ -11,7 +11,7 @@ import requests
 from lorcana.coach.types import CoachAnalyzerResult, CoachFindingDraft
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
-PROMPT_VERSION = "lorcana_coach_v2_grounded"
+PROMPT_VERSION = "lorcana_coach_v4_tournament_references"
 
 
 class OpenAIAnalyzerError(RuntimeError):
@@ -79,8 +79,26 @@ legality engine exists. Never claim a line is mechanically verified or certainly
 Card text can override general rules; check restrictions and board-wide effects.
 Do not assume missing stats, hidden information, or unresolved ability sources.
 Do not use future draws or revealed information to judge an earlier decision.
-The rules bundle is scoped to Comprehensive Rules; omit claims needing unavailable
-errata or set rulings. Omit a claim when its supporting evidence is insufficient.
+The rules bundle includes Comprehensive Rules, the explicitly listed set guides,
+and tournament rules. Tournament rules cover organized-play procedures and formats;
+they are not interchangeable with gameplay rules. Cite tournament references for
+claims about match procedure, takebacks, concessions/draws, deck legality, or time limits.
+Do not assume a Duels replay was a sanctioned tournament, or infer its format, event
+level, clock, or opponent agreement. If that context is missing, offer only explicitly
+conditional tournament guidance; do not mark a replay action as a tournament violation.
+Do not prescribe penalties or judge remedies without the applicable correction policy.
+Tournament documents and set guides may have different effective dates. Follow the
+current-reference scope and never treat them as proof of historical applicability.
+Set notes may describe superseded rules or errata. Read their context; never combine
+contradictory versions. Omit a claim if conflicts cannot be resolved from these sources.
+Do not assume that missing set guides or errata have been checked.
+When rules.review_mode is current_reference, review decisions for practice under the
+bundled references. Do not claim those rules or current catalog wording applied on the
+replay date, or call a historical play illegal. Phrase every rules-dependent finding
+and recommendation as applying "under the bundled references". A later rules change
+is not a player mistake. Omit retrospective criticism that depends on uncertain historical
+rules or card wording. Date coverage is provenance, not proof of historical legality.
+Omit a claim when its supporting evidence is insufficient.
 Put substantive claims in cited findings. The summary only summarizes those findings;
 it must not introduce additional rules claims or unsupported criticism.
 """

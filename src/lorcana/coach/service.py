@@ -71,6 +71,8 @@ def _collect_card_ids(value: Any, output: set[str]) -> None:
 
 def _render_report(summary: str, findings: tuple[CoachFindingDraft, ...], rules: dict | None = None) -> str:
     lines = ["# Lorcana Game Review", "", summary.strip()]
+    if rules and rules.get("review_notice"):
+        lines.extend(["", "**Reference scope:** " + rules["review_notice"]])
     if not findings:
         lines.extend(["", "## Findings", "", "No actionable findings were identified."])
         return "\n".join(lines)
@@ -94,7 +96,13 @@ def _render_report(summary: str, findings: tuple[CoachFindingDraft, ...], rules:
         if refs:
             citations = (rules or {}).get("citations", {})
             url = (rules or {}).get("source_url")
-            links = [f"[{ref}]({url}#page={citations[ref]['page']})" if url and ref in citations else ref for ref in refs]
+            documents = (rules or {}).get("documents", {})
+            links = []
+            for ref in refs:
+                citation = citations.get(ref, {})
+                source = documents.get(citation.get("document_id"), {}).get("source_url", url)
+                links.append(f"[{ref}]({source}#page={citation['page']})"
+                             if source and "page" in citation else ref)
             lines.append("**Rules references:** " + ", ".join(links))
             lines.append("Rules interpretation is model-generated; citations are checked, legality is not mechanically verified.")
         lines.append("")

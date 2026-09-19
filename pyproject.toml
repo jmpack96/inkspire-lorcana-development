@@ -40,3 +40,6 @@ addopts = "-ra"
 markers = [
     "integration: requires a dedicated PostgreSQL test database",
 ]
+
+[tool.setuptools.package-data]
+"lorcana.coach" = ["resources/*.json"]

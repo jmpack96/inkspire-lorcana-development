@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
+PACKAGED_BUNDLE = Path(__file__).parent / "resources" / "rules-current.json"
+
 OFFICIAL_RULES_URL = "https://files.disneylorcana.com/Comprehensive-Rules_2.2.0-EN.pdf"
 
 
@@ -16,9 +18,8 @@ def digest(value: dict) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def load_bundle(path: Path | None) -> dict | None:
-    if path is None:
-        return None
+def load_bundle(path: Path | str | None = None) -> dict:
+    path = Path(path) if path is not None else PACKAGED_BUNDLE
     data = json.loads(path.read_text())
     expected = data.pop("bundle_sha256", None)
     if digest(data) != expected:
@@ -29,7 +30,16 @@ def load_bundle(path: Path | None) -> dict | None:
     parsed = urlsplit(data["source_url"])
     if parsed.scheme != "https" or parsed.hostname != "files.disneylorcana.com":
         raise ValueError("Rules source must be the official Disney Lorcana document host")
+    documents = data.get("documents", {})
+    for document in documents.values():
+        source = urlsplit(document["source_url"])
+        if source.scheme != "https" or source.hostname != "files.disneylorcana.com":
+            raise ValueError("Rules source must be the official Disney Lorcana document host")
+        if not document.get("source_sha256"):
+            raise ValueError("Rules document has no source checksum")
     for citation in data["citations"].values():
+        if documents and citation.get("document_id") not in documents:
+            raise ValueError("Rules citation has an unknown document")
         if not isinstance(citation.get("text"), str) or not citation["text"].strip():
             raise ValueError("Rules reference has an empty passage")
     return {**data, "bundle_sha256": expected}
@@ -41,10 +51,27 @@ def for_game(bundle: dict | None, played_at: str | None) -> dict:
     try:
         played = date.fromisoformat(str(played_at)[:10])
     except ValueError:
-        return {"status": "game_date_unknown", "citations": {}}
-    if not date.fromisoformat(bundle["effective_from"]) <= played <= date.fromisoformat(bundle["verified_through"]):
-        return {"status": "outside_verified_dates", "citations": {}}
-    return {**bundle, "status": "available"}
+        coverage = "game_date_unknown"
+    else:
+        if played < date.fromisoformat(bundle["effective_from"]):
+            coverage = "before_reference"
+        elif played > date.fromisoformat(bundle["verified_through"]):
+            coverage = "after_review"
+        else:
+            coverage = "within_reference_window"
+    return {
+        **bundle, "status": "available", "review_mode": "current_reference",
+        "date_coverage": coverage, "historical_legality_verified": False,
+        "review_notice": (
+            "Current-reference coaching: uses the bundled official rules references "
+            f"checked through {bundle['verified_through']}. "
+            "Rules and card wording in force on the replay date have not been verified. "
+            "Rules-dependent advice is for practice under these references, not a historical legality verdict."
+            + (" This game predates the comprehensive rules reference." if coverage == "before_reference" else "")
+            + (" This game is newer than the last reference review; later changes may be missing." if coverage == "after_review" else "")
+            + (" The replay date is unknown." if coverage == "game_date_unknown" else "")
+        ),
+    }
 
 
 def import_pdf(pdf: bytes, *, source_url: str, version: str, effective_from: str, verified_through: str) -> dict:
