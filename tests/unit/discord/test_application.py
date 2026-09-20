@@ -9,6 +9,7 @@ from lorcana.interfaces.discord.application import DiscordApplication
 from lorcana.playhub.query_service import DatabaseStatus, LatestImport, SetChampionshipEvent
 from lorcana.ratings.query_service import (
     LeaderboardEntry,
+    PlayerHistory,
     PlayerProfile,
     PlayerSearchResult,
     PublishedLeaderboard,
@@ -35,6 +36,7 @@ class Ratings:
     def __init__(self):
         self.matches = ()
         self.profile = None
+        self.history = None
         self.board = PublishedLeaderboard(publication=RUN, entries=())
 
     def search_players(self, query):
@@ -44,6 +46,10 @@ class Ratings:
     def player_profile(self, player_id):
         self.player_id = player_id
         return self.profile
+
+    def player_history(self, player_id):
+        self.history_player_id = player_id
+        return self.history
 
     def competitive_leaderboard(self, *, minimum_matches, limit):
         self.board_args = (minimum_matches, limit)
@@ -160,9 +166,27 @@ def test_single_player_returns_profile_embed():
         performance_vs_expected=0.5,
     )
     response = application.player("A")
-    assert response.ephemeral is False
+    assert response.ephemeral is True
     assert response.embeds[0].title == "a"
     assert ratings.player_id == 1
+
+
+def test_single_player_history_is_ephemeral():
+    application, ratings, _, _ = app()
+    ratings.matches = (PlayerSearchResult(1, "A", "a", 1500.0, 5),)
+    ratings.history = PlayerHistory(
+        publication=RUN,
+        player_id=1,
+        display_name="A",
+        username="a",
+        events=(),
+    )
+
+    response = application.player_history("A")
+
+    assert response.ephemeral is True
+    assert response.embeds[0].title == "a — Player History"
+    assert ratings.history_player_id == 1
 
 
 def test_leaderboard_empty_and_populated_paths():

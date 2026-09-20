@@ -85,7 +85,10 @@ class DiscordApplication:
                 content="That player could not be loaded.",
                 ephemeral=True,
             )
-        return DiscordResponse(embeds=(player_profile_view(profile),))
+        return DiscordResponse(
+            embeds=(player_profile_view(profile),),
+            ephemeral=True,
+        )
 
     def player_history(self, query: str) -> DiscordResponse:
         matches = self.ratings.search_players(query)
@@ -111,7 +114,8 @@ class DiscordApplication:
             )
 
         return DiscordResponse(
-            embeds=player_history_views(history)
+            embeds=player_history_views(history),
+            ephemeral=True,
         )
 
     def team_players(self) -> tuple[TeamLeaderboardMember, ...]:
