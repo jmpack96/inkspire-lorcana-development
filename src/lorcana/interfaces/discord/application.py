@@ -25,7 +25,7 @@ from lorcana.coach.service import CoachService
 from lorcana.identity.query_service import IdentityQueryService
 from lorcana.playhub.query_service import PlayHubQueryService
 from lorcana.ratings.query_service import RatingQueryService
-from lorcana.teams.query_service import TeamQueryService
+from lorcana.teams.query_service import TeamLeaderboardMember, TeamQueryService
 
 
 @dataclass(frozen=True)
@@ -108,6 +108,15 @@ class DiscordApplication:
 
         return DiscordResponse(
             embeds=player_history_views(history)
+        )
+
+    def team_players(self) -> tuple[TeamLeaderboardMember, ...]:
+        """Return the default team's members that can be used for player lookup."""
+        data = self.teams.leaderboard(self.default_team_slug)
+        return tuple(
+            member
+            for member in data.members
+            if member.playhub_player_id is not None
         )
 
     def leaderboard(self, *, minimum_matches: int = 20, limit: int = 25) -> DiscordResponse:

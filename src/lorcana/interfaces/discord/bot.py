@@ -5,6 +5,7 @@ No scheduling, ingestion, rating calculation, or SQL belongs here.
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from lorcana.bootstrap import ApplicationResources
@@ -181,22 +182,119 @@ def create_bot(resources: ApplicationResources):
             return
         await _send_response(interaction, discord, response)
 
+    async def choose_team_player(
+        interaction: Any,
+        call: Callable[[str], DiscordResponse],
+        *,
+        prompt: str,
+    ) -> None:
+        """Show the default team roster and run ``call`` for the selected player."""
+        await interaction.response.defer(ephemeral=True)
+        try:
+            members = await asyncio.to_thread(application.team_players)
+            members = tuple(
+                sorted(
+                    members,
+                    key=lambda member: member.preferred_display_name.casefold(),
+                )
+            )
+        except Exception:
+            logger.exception("Discord team player selector failed")
+            await interaction.followup.send(
+                "There was an error loading the team roster.",
+                ephemeral=True,
+            )
+            return
+
+        if not members:
+            await interaction.followup.send(
+                "No linked players were found on the team roster. Use the optional "
+                "`query` argument to look up a player directly.",
+                ephemeral=True,
+            )
+            return
+
+        # Discord permits 25 options per string select and five component rows.
+        # Splitting the roster preserves a full-team selector as the team grows.
+        if len(members) > 125:
+            await interaction.followup.send(
+                "The team roster is too large for a Discord selection menu. Use the "
+                "optional `query` argument to look up a player directly.",
+                ephemeral=True,
+            )
+            return
+
+        chunks = [members[index:index + 25] for index in range(0, len(members), 25)]
+
+        class TeamPlayerSelect(discord.ui.Select):
+            def __init__(self, chunk, index: int) -> None:
+                placeholder = "Choose a team player"
+                if len(chunks) > 1:
+                    placeholder += f" ({index + 1}/{len(chunks)})"
+                super().__init__(
+                    placeholder=placeholder,
+                    min_values=1,
+                    max_values=1,
+                    options=[
+                        discord.SelectOption(
+                            label=member.preferred_display_name[:100],
+                            value=str(member.playhub_player_id),
+                            description=f"Play Hub player ID {member.playhub_player_id}",
+                        )
+                        for member in chunk
+                    ],
+                )
+
+            async def callback(self, select_interaction: discord.Interaction) -> None:
+                await execute(
+                    select_interaction,
+                    call,
+                    self.values[0],
+                    ephemeral=True,
+                )
+
+        class TeamPlayerView(discord.ui.View):
+            def __init__(self) -> None:
+                super().__init__(timeout=300)
+                for index, chunk in enumerate(chunks):
+                    self.add_item(TeamPlayerSelect(chunk, index))
+
+        await interaction.followup.send(
+            prompt,
+            view=TeamPlayerView(),
+            ephemeral=True,
+        )
+
     @bot.tree.command(name="player", description="Look up a Lorcana player's stats.")
-    @app_commands.describe(query="Play Hub name, username, or player ID")
-    async def player(interaction: discord.Interaction, query: str) -> None:
-        await execute(interaction, application.player, query)
+    @app_commands.describe(query="Optional Play Hub name, username, or player ID")
+    async def player(interaction: discord.Interaction, query: str | None = None) -> None:
+        if query:
+            await execute(interaction, application.player, query)
+            return
+        await choose_team_player(
+            interaction,
+            application.player,
+            prompt="Choose a team player to view their stats.",
+        )
 
     @bot.tree.command(
         name="playerhistory",
         description="Show a Lorcana player's tournament and match history.",
     )
     @app_commands.describe(
-        query="Play Hub name, username, or player ID"
+        query="Optional Play Hub name, username, or player ID"
     )
     async def playerhistory(
         interaction: discord.Interaction,
-        query: str,
+        query: str | None = None,
     ) -> None:
+        if not query:
+            await choose_team_player(
+                interaction,
+                application.player_history,
+                prompt="Choose a team player to view their tournament and match history.",
+            )
+            return
         await execute(
             interaction,
             application.player_history,

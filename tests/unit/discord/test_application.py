@@ -184,6 +184,16 @@ def test_database_status_set_champs_and_team_are_delegated():
     assert teams.slug == "inkspire"
 
 
+def test_team_players_returns_linked_default_team_members():
+    application, _, _, teams = app()
+
+    members = application.team_players()
+
+    assert [member.preferred_display_name for member in members] == ["Jacob"]
+    assert [member.playhub_player_id for member in members] == [7504]
+    assert teams.slug == "inkspire"
+
+
 class Identity:
     def __init__(self, member=None):
         self.member = member
