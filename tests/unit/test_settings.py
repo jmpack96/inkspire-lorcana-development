@@ -39,6 +39,7 @@ def test_discord_settings_are_optional_but_validated(tmp_path):
     settings = Settings.from_env({"LORCANA_DATA_DIR": str(tmp_path)})
     assert settings.discord_bot_token is None
     assert settings.discord_team_slug == "inkspire"
+    assert settings.live_event_channel_id is None
     with pytest.raises(ConfigurationError, match="DISCORD_BOT_TOKEN"):
         settings.require_discord_bot_token()
 
@@ -46,9 +47,11 @@ def test_discord_settings_are_optional_but_validated(tmp_path):
         "LORCANA_DATA_DIR": str(tmp_path),
         "DISCORD_BOT_TOKEN": "super-secret-token",
         "LORCANA_DISCORD_TEAM_SLUG": "Inkspire",
+        "LORCANA_LIVE_EVENT_CHANNEL_ID": "123456789",
     })
     assert configured.require_discord_bot_token() == "super-secret-token"
     assert configured.discord_team_slug == "inkspire"
+    assert configured.live_event_channel_id == 123456789
     assert "super-secret-token" not in repr(configured)
 
 
@@ -57,6 +60,8 @@ def test_empty_discord_settings_are_rejected():
         Settings.from_env({"DISCORD_BOT_TOKEN": "   "})
     with pytest.raises(ConfigurationError, match="LORCANA_DISCORD_TEAM_SLUG"):
         Settings.from_env({"LORCANA_DISCORD_TEAM_SLUG": "   "})
+    with pytest.raises(ConfigurationError, match="LORCANA_LIVE_EVENT_CHANNEL_ID"):
+        Settings.from_env({"LORCANA_LIVE_EVENT_CHANNEL_ID": "not-an-id"})
 
 
 def test_coach_analyzer_settings_are_optional_and_versioned(tmp_path):

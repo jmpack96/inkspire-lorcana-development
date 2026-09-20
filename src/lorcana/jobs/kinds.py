@@ -20,6 +20,7 @@ DUELS_PROCESS_REPLAY = "duels.process_replay"
 COACH_ANALYZE_REPLAY = "coach.analyze_replay"
 CATALOG_REFRESH_LORCAST = "catalog.refresh_lorcast"
 MAINTENANCE_PRUNE_JOBS = "maintenance.prune_jobs"
+DISCORD_SCAN_LIVE_EVENTS = "discord.scan_live_events"
 
 
 def enqueue_discovery(queue: JobQueue, day: date, *, force: bool = False) -> EnqueuedJob:

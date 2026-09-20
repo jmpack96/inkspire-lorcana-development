@@ -10,6 +10,7 @@ def test_migrations_create_foundation_schema(db_engine):
         "alembic_version", "playhub_events", "playhub_players", "playhub_matches",
         "rating_runs", "rating_run_inputs", "rating_current", "rating_publications",
         "discord_command_usage",
+        "discord_live_event_announcements",
     } <= tables
 
 

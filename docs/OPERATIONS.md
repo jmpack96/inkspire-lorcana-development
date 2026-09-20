@@ -11,6 +11,24 @@ Run exactly two application processes against one PostgreSQL database:
 
 The bot must never be used as a scheduler.
 
+## Live team-event Discord links
+
+Set `LORCANA_LIVE_EVENT_CHANNEL_ID` to the destination Discord channel ID on
+both the worker and bot services, then rerun `lorcana schedules-bootstrap`.
+The worker refreshes possible team events every five minutes and queues a link
+only when all of these checks pass:
+
+- an active team member has a freshly synced active registration;
+- Play Hub freshly reports an exact `LIVE` status;
+- the current instant is between the event start and end times;
+- the event start date is today in the event's declared timezone;
+- the event has a valid Play Hub URL; and
+- that event has not already been queued for the configured channel.
+
+The bot delivers the durable queue and retries transient Discord failures. The
+message contains only the Play Hub event URL. Leave the variable unset on both
+services to disable the feature.
+
 ## First-time database setup
 
 Apply the schema before starting either runtime process:

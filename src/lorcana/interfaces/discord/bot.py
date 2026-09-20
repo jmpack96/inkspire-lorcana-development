@@ -17,6 +17,7 @@ from lorcana.coach.service import CoachService
 from lorcana.duels.query_service import DuelsQueryService
 from lorcana.identity.query_service import IdentityQueryService
 from lorcana.jobs.service import JobQueue
+from lorcana.notifications.live_events import LiveEventAlertService
 from lorcana.interfaces.discord.application import DiscordApplication, DiscordResponse
 from lorcana.interfaces.discord.views import EmbedSpec
 from lorcana.playhub.query_service import PlayHubQueryService
@@ -135,6 +136,7 @@ def create_bot(resources: ApplicationResources):
     coach_requests = None
     coach_service = None
     usage = DiscordUsageService.from_engine(resources.engine)
+    live_event_alerts = LiveEventAlertService.from_engine(resources.engine)
     identity = IdentityQueryService.from_engine(resources.engine)
     if resources.settings.coach_analyzer_name is not None:
         coach_requests = CoachRequestService(
@@ -160,13 +162,57 @@ def create_bot(resources: ApplicationResources):
         def __init__(self) -> None:
             super().__init__(intents=discord.Intents.default())
             self.tree = app_commands.CommandTree(self)
+            self.live_event_delivery_task: asyncio.Task | None = None
 
         async def setup_hook(self) -> None:
             synced = await self.tree.sync()
             logger.info("Synced %d Discord slash commands", len(synced))
+            if getattr(resources.settings, "live_event_channel_id", None) is not None:
+                self.live_event_delivery_task = asyncio.create_task(
+                    self.deliver_live_event_links()
+                )
+
+        async def deliver_live_event_links(self) -> None:
+            await self.wait_until_ready()
+            while not self.is_closed():
+                announcement = await asyncio.to_thread(live_event_alerts.next_pending)
+                if announcement is None:
+                    await asyncio.sleep(5)
+                    continue
+                try:
+                    eligible = await asyncio.to_thread(
+                        live_event_alerts.event_is_eligible,
+                        resources.settings.discord_team_slug,
+                        announcement.event_id,
+                    )
+                    if not eligible:
+                        raise RuntimeError("event is no longer actively happening")
+                    channel = await self.fetch_channel(announcement.channel_id)
+                    message = await channel.send(announcement.event_url)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    logger.exception(
+                        "Failed to deliver live event %s to channel %s",
+                        announcement.event_id,
+                        announcement.channel_id,
+                    )
+                    await asyncio.to_thread(
+                        live_event_alerts.mark_failed,
+                        announcement,
+                        error,
+                    )
+                    continue
+                await asyncio.to_thread(
+                    live_event_alerts.mark_sent,
+                    announcement.announcement_id,
+                    int(message.id),
+                )
 
         async def close(self) -> None:
             try:
+                if self.live_event_delivery_task is not None:
+                    self.live_event_delivery_task.cancel()
                 await super().close()
             finally:
                 resources.close()

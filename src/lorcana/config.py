@@ -43,6 +43,7 @@ class Settings:
     data_dir: Path = field(default_factory=lambda: Path.cwd() / "data")
     discord_bot_token: str | None = field(default=None, repr=False)
     discord_team_slug: str = "inkspire"
+    live_event_channel_id: int | None = None
     coach_analyzer_name: str | None = None
     coach_analyzer_generation: str = "v1"
     coach_rules_bundle: Path | None = None
@@ -71,6 +72,19 @@ class Settings:
         discord_team_slug = source.get("LORCANA_DISCORD_TEAM_SLUG", "inkspire").strip().lower()
         if not discord_team_slug:
             raise ConfigurationError("LORCANA_DISCORD_TEAM_SLUG must not be empty")
+        raw_live_channel = source.get("LORCANA_LIVE_EVENT_CHANNEL_ID")
+        live_event_channel_id = None
+        if raw_live_channel is not None:
+            try:
+                live_event_channel_id = int(raw_live_channel)
+            except ValueError as error:
+                raise ConfigurationError(
+                    "LORCANA_LIVE_EVENT_CHANNEL_ID must be a positive Discord channel ID"
+                ) from error
+            if live_event_channel_id <= 0:
+                raise ConfigurationError(
+                    "LORCANA_LIVE_EVENT_CHANNEL_ID must be a positive Discord channel ID"
+                )
         raw_coach_name = source.get("LORCANA_COACH_ANALYZER")
         coach_analyzer_name = None if raw_coach_name is None else raw_coach_name.strip().lower()
         if raw_coach_name is not None and not coach_analyzer_name:
@@ -96,6 +110,7 @@ class Settings:
             data_dir=data_dir,
             discord_bot_token=discord_bot_token,
             discord_team_slug=discord_team_slug,
+            live_event_channel_id=live_event_channel_id,
             coach_analyzer_name=coach_analyzer_name,
             coach_analyzer_generation=coach_analyzer_generation,
             coach_rules_bundle=Path(source["LORCANA_COACH_RULES_BUNDLE"]) if source.get("LORCANA_COACH_RULES_BUNDLE") else None,

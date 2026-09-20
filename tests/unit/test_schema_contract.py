@@ -17,6 +17,7 @@ def test_foundation_tables_are_registered():
         "catalog_snapshots", "catalog_cards",
         "decklists", "decklist_cards", "coach_analysis_runs", "coach_findings", "coach_reports",
         "discord_command_usage",
+        "discord_live_event_announcements",
     }
     assert expected == set(metadata.tables)
 

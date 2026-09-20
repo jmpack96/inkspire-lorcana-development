@@ -11,6 +11,7 @@ from sqlalchemy.engine import Engine
 from lorcana.jobs.kinds import (
     CATALOG_REFRESH_LORCAST,
     DUELS_SYNC_CONNECTION,
+    DISCORD_SCAN_LIVE_EVENTS,
     MAINTENANCE_PRUNE_JOBS,
     PLAYHUB_DISCOVER_WINDOW,
     PLAYHUB_IMPORT_SWEEP,
@@ -67,6 +68,15 @@ def default_platform_schedules() -> tuple[ScheduleDefinition, ...]:
             },
             resource_key="global",
             priority=15,
+            max_attempts=3,
+        ),
+        ScheduleDefinition(
+            name="discord-scan-live-events",
+            kind=DISCORD_SCAN_LIVE_EVENTS,
+            schedule_spec={"type": "interval", "seconds": 5 * 60},
+            payload={},
+            resource_key="live-events",
+            priority=18,
             max_attempts=3,
         ),
         ScheduleDefinition(

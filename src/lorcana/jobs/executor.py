@@ -18,6 +18,7 @@ from lorcana.jobs.kinds import (
     DUELS_SYNC_CONNECTION,
     COACH_ANALYZE_REPLAY,
     CATALOG_REFRESH_LORCAST,
+    DISCORD_SCAN_LIVE_EVENTS,
     MAINTENANCE_PRUNE_JOBS,
     PLAYHUB_DISCOVER_DAY,
     PLAYHUB_DISCOVER_WINDOW,
@@ -30,6 +31,7 @@ from lorcana.jobs.kinds import (
 )
 from lorcana.jobs.service import JobQueue
 from lorcana.jobs.types import JobLease
+from lorcana.notifications.live_events import LiveEventAlertService
 from lorcana.playhub.client import PlayHubClient
 from lorcana.playhub.service import (
     PlayHubDiscoveryService,
@@ -69,6 +71,8 @@ class PlatformJobExecutor:
             return self._refresh_lorcast_catalog()
         if lease.kind == MAINTENANCE_PRUNE_JOBS:
             return self._prune_jobs(lease.payload)
+        if lease.kind == DISCORD_SCAN_LIVE_EVENTS:
+            return self._scan_live_events()
         if lease.kind == COACH_ANALYZE_REPLAY:
             return self._coach_analyze_replay(
                 lease.payload,
@@ -246,6 +250,47 @@ class PlatformJobExecutor:
         return {
             "deleted_jobs": deleted,
             "retention_days": retention_days,
+        }
+
+    def _scan_live_events(self) -> dict[str, Any]:
+        from lorcana.config import Settings
+
+        settings = Settings.from_env()
+        if settings.live_event_channel_id is None:
+            return {
+                "enabled": False,
+                "candidates": 0,
+                "refreshed": 0,
+                "refresh_failures": 0,
+                "queued": 0,
+            }
+        alerts = LiveEventAlertService.from_engine(self.engine)
+        event_ids = alerts.potential_event_ids(settings.discord_team_slug)
+        refreshed = 0
+        refresh_failures = 0
+        client = PlayHubClient()
+        try:
+            importer = PlayHubImportService.from_engine(self.engine, client=client)
+            for event_id in event_ids:
+                try:
+                    importer.import_event(event_id)
+                    refreshed += 1
+                except Exception:
+                    # Strict freshness checks prevent stale data from announcing.
+                    refresh_failures += 1
+                    continue
+        finally:
+            client.close()
+        queued = alerts.reserve_eligible(
+            settings.discord_team_slug,
+            settings.live_event_channel_id,
+        )
+        return {
+            "enabled": True,
+            "candidates": len(event_ids),
+            "refreshed": refreshed,
+            "refresh_failures": refresh_failures,
+            "queued": queued,
         }
 
     def _sync_duels_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
