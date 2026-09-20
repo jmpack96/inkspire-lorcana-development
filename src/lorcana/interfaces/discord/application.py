@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from lorcana.analytics.service import DiscordUsageService
 from lorcana.interfaces.discord.views import (
     EmbedSpec,
     coach_report_views,
@@ -19,6 +20,7 @@ from lorcana.interfaces.discord.views import (
     set_championship_views,
     team_leaderboard_view,
     player_history_views,
+    command_usage_view,
 )
 from lorcana.coach.request_service import CoachRequestError, CoachRequestService
 from lorcana.coach.service import CoachService
@@ -52,6 +54,7 @@ class DiscordApplication:
         identity: IdentityQueryService | None = None,
         coach_requests: CoachRequestService | None = None,
         coach: CoachService | None = None,
+        usage: DiscordUsageService | None = None,
     ) -> None:
         if not default_team_slug.strip():
             raise ValueError("default_team_slug must not be empty")
@@ -61,6 +64,7 @@ class DiscordApplication:
         self.identity = identity
         self.coach_requests = coach_requests
         self.coach = coach
+        self.usage = usage
         self.default_team_slug = default_team_slug.strip().lower()
 
     def player(self, query: str) -> DiscordResponse:
@@ -133,6 +137,17 @@ class DiscordApplication:
     def team_leaderboard(self, *, team_slug: str | None = None) -> DiscordResponse:
         data = self.teams.leaderboard(team_slug or self.default_team_slug)
         return DiscordResponse(embeds=(team_leaderboard_view(data),))
+
+    def command_stats(self, *, days: int = 30) -> DiscordResponse:
+        if self.usage is None:
+            return DiscordResponse(
+                content="Discord command analytics are not configured.",
+                ephemeral=True,
+            )
+        return DiscordResponse(
+            embeds=(command_usage_view(self.usage.summary(days=days)),),
+            ephemeral=True,
+        )
 
     def database_status(self) -> DiscordResponse:
         return DiscordResponse(embeds=(database_status_view(self.playhub.database_status()),))

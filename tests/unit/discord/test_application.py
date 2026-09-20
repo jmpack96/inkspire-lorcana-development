@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import UUID
 
+from lorcana.analytics.service import CommandUsageEntry, CommandUsageSummary
 from lorcana.interfaces.discord.application import DiscordApplication
 from lorcana.playhub.query_service import DatabaseStatus, LatestImport, SetChampionshipEvent
 from lorcana.ratings.query_service import (
@@ -88,6 +89,27 @@ class Teams:
             ),),
             recent_events=(),
             recent_event_days=7,
+        )
+
+
+class Usage:
+    def summary(self, *, days):
+        self.days = days
+        return CommandUsageSummary(
+            days=days,
+            invocations=3,
+            unique_users=2,
+            failures=1,
+            entries=(
+                CommandUsageEntry(
+                    command_name="player",
+                    invocations=3,
+                    unique_users=2,
+                    failures=1,
+                    average_duration_ms=25,
+                    team_selector_invocations=0,
+                ),
+            ),
         )
 
 
@@ -192,6 +214,23 @@ def test_team_players_returns_linked_default_team_members():
     assert [member.preferred_display_name for member in members] == ["Jacob"]
     assert [member.playhub_player_id for member in members] == [7504]
     assert teams.slug == "inkspire"
+
+
+def test_command_stats_is_private_and_delegates_requested_period():
+    usage = Usage()
+    application = DiscordApplication(
+        ratings=Ratings(),
+        playhub=PlayHub(),
+        teams=Teams(),
+        usage=usage,
+    )
+
+    response = application.command_stats(days=14)
+
+    assert response.ephemeral is True
+    assert response.embeds[0].title == "Discord Command Usage — 14 Days"
+    assert "3" in response.embeds[0].description
+    assert usage.days == 14
 
 
 class Identity:

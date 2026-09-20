@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from lorcana.analytics.service import CommandUsageSummary
 from lorcana.playhub.query_service import DatabaseStatus, SetChampionshipEvent
 from lorcana.ratings.query_service import PlayerProfile, PlayerSearchResult, PublishedLeaderboard, PlayerHistory, PlayerHistoryMatch
 from lorcana.teams.query_service import TeamLeaderboard
@@ -23,6 +24,55 @@ class EmbedSpec:
     description: str | None = None
     fields: tuple[EmbedField, ...] = field(default_factory=tuple)
     footer: str | None = None
+
+
+def command_usage_view(summary: CommandUsageSummary) -> EmbedSpec:
+    if not summary.entries:
+        return EmbedSpec(
+            title=f"Discord Command Usage — {summary.days} Days",
+            description="No command usage has been recorded in this period.",
+        )
+
+    fields = []
+    for entry in sorted(
+        summary.entries,
+        key=lambda item: (-item.invocations, item.command_name),
+    ):
+        mode = ""
+        if entry.team_selector_invocations:
+            direct_invocations = entry.invocations - entry.team_selector_invocations
+            mode = (
+                f"\nDirect: {direct_invocations} • "
+                f"Team selector: {entry.team_selector_invocations}"
+            )
+        fields.append(
+            EmbedField(
+                name=f"/{entry.command_name}",
+                value=(
+                    f"Uses: **{entry.invocations}** • "
+                    f"Users: **{entry.unique_users}** • "
+                    f"Failures: **{entry.failures}** • "
+                    f"Avg: **{entry.average_duration_ms} ms**{mode}"
+                ),
+                inline=False,
+            )
+        )
+
+    success_rate = (
+        100 * (summary.invocations - summary.failures) / summary.invocations
+        if summary.invocations
+        else 100.0
+    )
+    return EmbedSpec(
+        title=f"Discord Command Usage — {summary.days} Days",
+        description=(
+            f"**{summary.invocations}** uses • "
+            f"**{summary.unique_users}** unique users • "
+            f"**{success_rate:.1f}%** successful"
+        ),
+        fields=tuple(fields[:25]),
+        footer="Search text and selected player names are not stored.",
+    )
 
 
 def _truncate(value: str, limit: int) -> str:

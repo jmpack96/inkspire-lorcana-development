@@ -5,9 +5,11 @@ No scheduling, ingestion, rating calculation, or SQL belongs here.
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
+from lorcana.analytics.service import DiscordUsageService
 from lorcana.bootstrap import ApplicationResources
 from lorcana.catalog.service import CatalogService
 from lorcana.coach.request_service import CoachRequestService
@@ -132,6 +134,7 @@ def create_bot(resources: ApplicationResources):
     discord, app_commands = _load_discord()
     coach_requests = None
     coach_service = None
+    usage = DiscordUsageService.from_engine(resources.engine)
     identity = IdentityQueryService.from_engine(resources.engine)
     if resources.settings.coach_analyzer_name is not None:
         coach_requests = CoachRequestService(
@@ -150,6 +153,7 @@ def create_bot(resources: ApplicationResources):
         identity=identity,
         coach_requests=coach_requests,
         coach=coach_service,
+        usage=usage,
     )
 
     class LorcanaBot(discord.Client):
@@ -169,7 +173,40 @@ def create_bot(resources: ApplicationResources):
 
     bot = LorcanaBot()
 
-    async def execute(interaction: Any, call, *args, ephemeral: bool = False, **kwargs) -> None:
+    async def record_usage(
+        interaction: Any,
+        *,
+        command_name: str,
+        invocation_mode: str,
+        succeeded: bool,
+        started_at: float,
+    ) -> None:
+        duration_ms = max(0, round((time.perf_counter() - started_at) * 1000))
+        guild_id = None if interaction.guild_id is None else int(interaction.guild_id)
+        try:
+            await asyncio.to_thread(
+                usage.record,
+                command_name=command_name,
+                invocation_mode=invocation_mode,
+                discord_user_id=int(interaction.user.id),
+                guild_id=guild_id,
+                succeeded=succeeded,
+                duration_ms=duration_ms,
+            )
+        except Exception:
+            logger.exception("Could not record Discord command usage")
+
+    async def execute(
+        interaction: Any,
+        call,
+        *args,
+        ephemeral: bool = False,
+        invocation_mode: str = "direct",
+        track_usage: bool = True,
+        command_name: str | None = None,
+        **kwargs,
+    ) -> None:
+        started_at = time.perf_counter()
         await interaction.response.defer(ephemeral=ephemeral)
         try:
             response = await asyncio.to_thread(call, *args, **kwargs)
@@ -179,16 +216,34 @@ def create_bot(resources: ApplicationResources):
                 "There was an error loading that request.",
                 ephemeral=True,
             )
+            if track_usage:
+                await record_usage(
+                    interaction,
+                    command_name=command_name or interaction.command.name,
+                    invocation_mode=invocation_mode,
+                    succeeded=False,
+                    started_at=started_at,
+                )
             return
         await _send_response(interaction, discord, response)
+        if track_usage:
+            await record_usage(
+                interaction,
+                command_name=command_name or interaction.command.name,
+                invocation_mode=invocation_mode,
+                succeeded=True,
+                started_at=started_at,
+            )
 
     async def choose_team_player(
         interaction: Any,
         call: Callable[[str], DiscordResponse],
         *,
         prompt: str,
+        command_name: str,
     ) -> None:
         """Show the default team roster and run ``call`` for the selected player."""
+        started_at = time.perf_counter()
         await interaction.response.defer(ephemeral=True)
         try:
             members = await asyncio.to_thread(application.team_players)
@@ -204,6 +259,13 @@ def create_bot(resources: ApplicationResources):
                 "There was an error loading the team roster.",
                 ephemeral=True,
             )
+            await record_usage(
+                interaction,
+                command_name=command_name,
+                invocation_mode="team_selector",
+                succeeded=False,
+                started_at=started_at,
+            )
             return
 
         if not members:
@@ -211,6 +273,13 @@ def create_bot(resources: ApplicationResources):
                 "No linked players were found on the team roster. Use the optional "
                 "`query` argument to look up a player directly.",
                 ephemeral=True,
+            )
+            await record_usage(
+                interaction,
+                command_name=command_name,
+                invocation_mode="team_selector",
+                succeeded=False,
+                started_at=started_at,
             )
             return
 
@@ -221,6 +290,13 @@ def create_bot(resources: ApplicationResources):
                 "The team roster is too large for a Discord selection menu. Use the "
                 "optional `query` argument to look up a player directly.",
                 ephemeral=True,
+            )
+            await record_usage(
+                interaction,
+                command_name=command_name,
+                invocation_mode="team_selector",
+                succeeded=False,
+                started_at=started_at,
             )
             return
 
@@ -251,6 +327,7 @@ def create_bot(resources: ApplicationResources):
                     call,
                     self.values[0],
                     ephemeral=True,
+                    track_usage=False,
                 )
 
         class TeamPlayerView(discord.ui.View):
@@ -264,17 +341,30 @@ def create_bot(resources: ApplicationResources):
             view=TeamPlayerView(),
             ephemeral=True,
         )
+        await record_usage(
+            interaction,
+            command_name=command_name,
+            invocation_mode="team_selector",
+            succeeded=True,
+            started_at=started_at,
+        )
 
     @bot.tree.command(name="player", description="Look up a Lorcana player's stats.")
     @app_commands.describe(query="Optional Play Hub name, username, or player ID")
     async def player(interaction: discord.Interaction, query: str | None = None) -> None:
         if query:
-            await execute(interaction, application.player, query)
+            await execute(
+                interaction,
+                application.player,
+                query,
+                invocation_mode="direct_query",
+            )
             return
         await choose_team_player(
             interaction,
             application.player,
             prompt="Choose a team player to view their stats.",
+            command_name="player",
         )
 
     @bot.tree.command(
@@ -293,12 +383,14 @@ def create_bot(resources: ApplicationResources):
                 interaction,
                 application.player_history,
                 prompt="Choose a team player to view their tournament and match history.",
+                command_name="playerhistory",
             )
             return
         await execute(
             interaction,
             application.player_history,
             query,
+            invocation_mode="direct_query",
         )
 
     @bot.tree.command(name="leaderboard", description="Show the global Lorcana Elo leaderboard.")
@@ -321,6 +413,38 @@ def create_bot(resources: ApplicationResources):
     @bot.tree.command(name="teamleaderboard", description="Show the team Elo leaderboard.")
     async def teamleaderboard(interaction: discord.Interaction) -> None:
         await execute(interaction, application.team_leaderboard)
+
+    @bot.tree.command(
+        name="commandstats",
+        description="Show recent Discord command usage (administrators only).",
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.describe(days="Number of days to include.")
+    async def commandstats(
+        interaction: discord.Interaction,
+        days: app_commands.Range[int, 1, 365] = 30,
+    ) -> None:
+        await execute(
+            interaction,
+            application.command_stats,
+            days=days,
+            ephemeral=True,
+        )
+
+    @commandstats.error
+    async def commandstats_error(
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError,
+    ) -> None:
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message(
+                "You need the Administrator permission to use `/commandstats`.",
+                ephemeral=True,
+            )
+            return
+        raise error
 
     @bot.tree.command(name="dbstatus", description="Show the current Global Lorcana database status.")
     async def dbstatus(interaction: discord.Interaction) -> None:
