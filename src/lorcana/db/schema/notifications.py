@@ -22,6 +22,7 @@ discord_live_event_announcements = Table(
     Column("event_id", BigInteger, ForeignKey("playhub_events.event_id"), nullable=False),
     Column("channel_id", BigInteger, nullable=False),
     Column("event_url", Text, nullable=False),
+    Column("message_content", Text, nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("status", Text, nullable=False),
     Column("attempt_count", Integer, nullable=False, server_default="0"),

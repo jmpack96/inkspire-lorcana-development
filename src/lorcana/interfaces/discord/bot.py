@@ -188,7 +188,10 @@ def create_bot(resources: ApplicationResources):
                     if not eligible:
                         raise RuntimeError("event is no longer actively happening")
                     channel = await self.fetch_channel(announcement.channel_id)
-                    message = await channel.send(announcement.event_url)
+                    message = await channel.send(
+                        announcement.message_content,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:

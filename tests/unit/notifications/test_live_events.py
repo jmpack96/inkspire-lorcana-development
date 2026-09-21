@@ -5,6 +5,7 @@ from lorcana.notifications.live_events import (
     LiveEventAlertService,
     PendingAnnouncement,
     event_date_is_current,
+    format_live_event_message,
 )
 
 
@@ -25,11 +26,21 @@ class Repository:
         self.eligible_values = values
         return ({
             "event_id": 101,
+            "event_name": "Inkspire Championship",
             "source_url": "https://tcg.ravensburgerplay.com/events/101",
             "end_datetime": NOW + timedelta(hours=1),
             "start_datetime": NOW - timedelta(hours=1),
             "timezone": "America/New_York",
-        },)
+            "player_name": "Jacob",
+        }, {
+            "event_id": 101,
+            "event_name": "Inkspire Championship",
+            "source_url": "https://tcg.ravensburgerplay.com/events/101",
+            "end_datetime": NOW + timedelta(hours=1),
+            "start_datetime": NOW - timedelta(hours=1),
+            "timezone": "America/New_York",
+            "player_name": "Ben",
+        })
 
     def reserve(self, connection, **values):
         self.reserved = values
@@ -41,6 +52,7 @@ class Repository:
             "event_id": 101,
             "channel_id": 999,
             "event_url": "https://tcg.ravensburgerplay.com/events/101",
+            "message_content": "**Inkspire Championship**\nPlaying: Ben, Jacob\nhttps://tcg.ravensburgerplay.com/events/101",
             "expires_at": NOW + timedelta(hours=1),
             "attempt_count": 0,
         }
@@ -67,6 +79,11 @@ def test_reservation_uses_fresh_active_event_and_is_idempotent_at_repository():
     assert repository.reserved["event_id"] == 101
     assert repository.reserved["channel_id"] == 999
     assert repository.reserved["expires_at"] == NOW + timedelta(hours=1)
+    assert repository.reserved["message_content"] == (
+        "**Inkspire Championship**\n"
+        "Playing: Ben, Jacob\n"
+        "https://tcg.ravensburgerplay.com/events/101"
+    )
 
 
 def test_pending_announcement_preserves_expiry_for_delivery_guard():
@@ -74,6 +91,20 @@ def test_pending_announcement_preserves_expiry_for_delivery_guard():
 
     assert isinstance(pending, PendingAnnouncement)
     assert pending.expires_at > NOW
+
+
+def test_live_event_message_lists_unique_players_alphabetically():
+    content = format_live_event_message(
+        "Sunday League",
+        ("Jacob", "Ben", "Jacob"),
+        "https://tcg.ravensburgerplay.com/events/101",
+    )
+
+    assert content == (
+        "**Sunday League**\n"
+        "Playing: Ben, Jacob\n"
+        "https://tcg.ravensburgerplay.com/events/101"
+    )
 
 
 def test_event_date_must_be_today_in_event_timezone_even_when_marked_live():

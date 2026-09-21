@@ -26,8 +26,26 @@ class PendingAnnouncement:
     event_id: int
     channel_id: int
     event_url: str
+    message_content: str
     expires_at: datetime
     attempt_count: int
+
+
+def format_live_event_message(
+    event_name: str,
+    player_names: tuple[str, ...],
+    event_url: str,
+) -> str:
+    names = ", ".join(sorted(set(player_names), key=str.casefold))
+    content = f"**{event_name.strip()}**\nPlaying: {names}\n{event_url.strip()}"
+    if len(content) <= 2000:
+        return content
+    fixed_length = len(event_url.strip()) + len("\nPlaying: \n")
+    name_limit = min(300, max(1, 2000 - fixed_length - 4))
+    event_label = event_name.strip()[:name_limit]
+    prefix = f"**{event_label}**\nPlaying: "
+    available_names = max(1, 2000 - len(prefix) - len(event_url.strip()) - 2)
+    return f"{prefix}{names[:available_names]}\n{event_url.strip()}"
 
 
 def event_date_is_current(
@@ -110,10 +128,12 @@ class LiveEventAlertRepository:
         return connection.execute(
             select(
                 playhub_events.c.event_id,
+                playhub_events.c.name.label("event_name"),
                 playhub_events.c.source_url,
                 playhub_events.c.end_datetime,
                 playhub_events.c.start_datetime,
                 playhub_events.c.timezone,
+                members.c.preferred_display_name.label("player_name"),
             )
             .select_from(self._team_events(team_slug))
             .where(
@@ -141,6 +161,7 @@ class LiveEventAlertRepository:
         event_id: int,
         channel_id: int,
         event_url: str,
+        message_content: str,
         expires_at: datetime,
         now: datetime,
     ) -> bool:
@@ -150,6 +171,7 @@ class LiveEventAlertRepository:
                 event_id=event_id,
                 channel_id=channel_id,
                 event_url=event_url,
+                message_content=message_content,
                 expires_at=expires_at,
                 status="pending",
                 attempt_count=0,
@@ -170,6 +192,7 @@ class LiveEventAlertRepository:
                 discord_live_event_announcements.c.event_id,
                 discord_live_event_announcements.c.channel_id,
                 discord_live_event_announcements.c.event_url,
+                discord_live_event_announcements.c.message_content,
                 discord_live_event_announcements.c.expires_at,
                 discord_live_event_announcements.c.attempt_count,
             )
@@ -263,7 +286,7 @@ class LiveEventAlertService:
                 now=now,
                 fresh_after=fresh_after,
             )
-        events = tuple(
+        eligible_rows = tuple(
             event
             for event in candidates
             if event_date_is_current(
@@ -272,14 +295,34 @@ class LiveEventAlertService:
                 now,
             )
         )
+        events: dict[int, dict] = {}
+        for row in eligible_rows:
+            event_id = int(row["event_id"])
+            event = events.setdefault(
+                event_id,
+                {
+                    "event_id": event_id,
+                    "event_name": str(row["event_name"]),
+                    "source_url": str(row["source_url"]),
+                    "end_datetime": row["end_datetime"],
+                    "player_names": set(),
+                },
+            )
+            event["player_names"].add(str(row["player_name"]))
         created = 0
         with self.transaction_factory() as connection:
-            for event in events:
+            for event in events.values():
+                player_names = tuple(event["player_names"])
                 created += int(self.repository.reserve(
                     connection,
                     event_id=int(event["event_id"]),
                     channel_id=int(channel_id),
                     event_url=str(event["source_url"]),
+                    message_content=format_live_event_message(
+                        str(event["event_name"]),
+                        player_names,
+                        str(event["source_url"]),
+                    ),
                     expires_at=event["end_datetime"],
                     now=now,
                 ))
