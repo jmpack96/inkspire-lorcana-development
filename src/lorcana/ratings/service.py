@@ -242,6 +242,11 @@ class RatingService:
             and current["input_count"] == input_count
             and current["ordered_input_digest"] == digest
         ):
+            # A no-op refresh is still an opportunity to enforce retention.
+            # This clears superseded runs left behind by older deployments or
+            # interrupted maintenance without manufacturing a duplicate run.
+            with self.transaction_factory() as connection:
+                self.repository.prune_unretained_runs(connection)
             return RatingBuildResult(
                 rating_run_id=current["rating_run_id"],
                 input_count=input_count,

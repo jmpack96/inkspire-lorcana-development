@@ -156,6 +156,7 @@ def create_bot(resources: ApplicationResources):
         coach_requests=coach_requests,
         coach=coach_service,
         usage=usage,
+        jobs=JobQueue.from_engine(resources.engine),
     )
 
     class LorcanaBot(discord.Client):
@@ -490,6 +491,33 @@ def create_bot(resources: ApplicationResources):
         if isinstance(error, app_commands.MissingPermissions):
             await interaction.response.send_message(
                 "You need the Administrator permission to use `/commandstats`.",
+                ephemeral=True,
+            )
+            return
+        raise error
+
+    @bot.tree.command(
+        name="refresh-elo",
+        description="Queue an immediate Global Elo refresh (administrators only).",
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def refresh_elo(interaction: discord.Interaction) -> None:
+        await execute(
+            interaction,
+            application.refresh_elo,
+            ephemeral=True,
+        )
+
+    @refresh_elo.error
+    async def refresh_elo_error(
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError,
+    ) -> None:
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message(
+                "You need the Administrator permission to use `/refresh-elo`.",
                 ephemeral=True,
             )
             return

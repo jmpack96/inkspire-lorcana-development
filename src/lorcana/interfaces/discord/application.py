@@ -8,6 +8,7 @@ renders the returned response.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from uuid import uuid4
 
 from lorcana.analytics.service import DiscordUsageService
 from lorcana.interfaces.discord.views import (
@@ -25,6 +26,8 @@ from lorcana.interfaces.discord.views import (
 from lorcana.coach.request_service import CoachRequestError, CoachRequestService
 from lorcana.coach.service import CoachService
 from lorcana.identity.query_service import IdentityQueryService
+from lorcana.jobs.kinds import enqueue_rating_build
+from lorcana.jobs.service import JobQueue
 from lorcana.playhub.query_service import PlayHubQueryService
 from lorcana.ratings.query_service import RatingQueryService
 from lorcana.teams.query_service import TeamLeaderboardMember, TeamQueryService
@@ -55,6 +58,7 @@ class DiscordApplication:
         coach_requests: CoachRequestService | None = None,
         coach: CoachService | None = None,
         usage: DiscordUsageService | None = None,
+        jobs: JobQueue | None = None,
     ) -> None:
         if not default_team_slug.strip():
             raise ValueError("default_team_slug must not be empty")
@@ -65,6 +69,7 @@ class DiscordApplication:
         self.coach_requests = coach_requests
         self.coach = coach
         self.usage = usage
+        self.jobs = jobs
         self.default_team_slug = default_team_slug.strip().lower()
 
     def player(self, query: str) -> DiscordResponse:
@@ -150,6 +155,29 @@ class DiscordApplication:
             )
         return DiscordResponse(
             embeds=(command_usage_view(self.usage.summary(days=days)),),
+            ephemeral=True,
+        )
+
+    def refresh_elo(self) -> DiscordResponse:
+        """Queue an immediate global Elo refresh for an administrator."""
+        if self.jobs is None:
+            return DiscordResponse(
+                content="The Elo refresh queue is not configured on this bot.",
+                ephemeral=True,
+            )
+        result = enqueue_rating_build(
+            self.jobs,
+            publication_name="global_elo",
+            policy="global",
+            generation=f"discord:{uuid4()}",
+        )
+        state = "Queued" if result.created else "Already queued"
+        return DiscordResponse(
+            content=(
+                f"{state} an immediate Global Elo refresh. Job `{result.job_id}`. "
+                "The worker will publish only if eligible match data changed and will "
+                "prune Elo runs older than the current and previous publications."
+            ),
             ephemeral=True,
         )
 

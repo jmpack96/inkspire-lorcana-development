@@ -277,6 +277,21 @@ def test_automated_refresh_does_not_create_duplicate_run_when_source_is_unchange
     assert len(repo.inputs) == 1
 
 
+def test_unchanged_refresh_still_prunes_unretained_runs():
+    repo = FakeRepository([candidate(1)])
+    current = service(repo).build_and_publish()
+    stale = UUID("00000000-0000-0000-0000-000000000399")
+    repo.runs[stale] = {"status": "failed"}
+    repo.inputs[stale] = [object()]
+
+    result = service(repo).build_and_publish_if_changed()
+
+    assert result.status == "unchanged"
+    assert result.rating_run_id == current.rating_run_id
+    assert set(repo.runs) == {current.rating_run_id}
+    assert stale not in repo.inputs
+
+
 def test_automated_refresh_builds_new_run_when_source_changes():
     first_id = UUID("00000000-0000-0000-0000-000000000301")
     second_id = UUID("00000000-0000-0000-0000-000000000302")

@@ -18,6 +18,22 @@ from lorcana.ratings.query_service import (
 )
 from lorcana.teams.query_service import TeamLeaderboard, TeamLeaderboardMember
 
+
+class Jobs:
+    def __init__(self):
+        self.calls = []
+
+    def enqueue(self, kind, **kwargs):
+        self.calls.append((kind, kwargs))
+        return type(
+            "Enqueued",
+            (),
+            {
+                "job_id": "00000000-0000-0000-0000-000000000401",
+                "created": True,
+            },
+        )()
+
 NOW = datetime(2026, 9, 13, 20, 0, tzinfo=timezone.utc)
 RUN = PublishedRatingRun(
     publication_name="global_elo",
@@ -255,6 +271,41 @@ def test_command_stats_is_private_and_delegates_requested_period():
     assert response.embeds[0].title == "Discord Command Usage — 14 Days"
     assert "3" in response.embeds[0].description
     assert usage.days == 14
+
+
+def test_refresh_elo_queues_unique_immediate_job_and_is_private():
+    jobs = Jobs()
+    application = DiscordApplication(
+        ratings=Ratings(),
+        playhub=PlayHub(),
+        teams=Teams(),
+        jobs=jobs,
+    )
+
+    response = application.refresh_elo()
+
+    assert response.ephemeral is True
+    assert response.content.startswith("Queued an immediate Global Elo refresh")
+    assert "current and previous" in response.content
+    kind, values = jobs.calls[0]
+    assert kind == "ratings.build_publish"
+    assert values["resource_key"] == "global_elo"
+    assert values["payload"] == {
+        "publication_name": "global_elo",
+        "policy": "global",
+    }
+    assert values["idempotency_key"].startswith(
+        "ratings.build_publish:global_elo:discord:"
+    )
+
+
+def test_refresh_elo_reports_unconfigured_queue():
+    application, _, _, _ = app()
+
+    response = application.refresh_elo()
+
+    assert response.ephemeral is True
+    assert "not configured" in response.content
 
 
 class Identity:
