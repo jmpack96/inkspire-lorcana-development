@@ -34,6 +34,7 @@ def test_maintenance_service_supports_long_recovery_window():
     service.due_event_import_ids(
         lookback_days=90,
         retry_minutes=180,
+        recent_complete_days=7,
         limit=500,
     )
 
@@ -51,12 +52,14 @@ def test_maintenance_service_derives_retry_cutoffs_from_one_clock_value():
     assert service.due_event_import_ids(
         lookback_days=14,
         retry_minutes=75,
+        recent_complete_days=7,
         limit=123,
     ) == (11, 22)
     assert repository.values == {
         "now": NOW,
         "lookback_start": NOW - timedelta(days=14),
         "retry_before": NOW - timedelta(minutes=75),
+        "recent_complete_after": NOW - timedelta(days=7),
         "limit": 123,
     }
 
@@ -67,6 +70,8 @@ def test_maintenance_service_derives_retry_cutoffs_from_one_clock_value():
         {"lookback_days": 0},
         {"lookback_days": 3651},
         {"retry_minutes": 0},
+        {"recent_complete_days": 0},
+        {"recent_complete_days": 31},
         {"limit": 0},
         {"limit": 5001},
     ],

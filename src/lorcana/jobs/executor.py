@@ -159,6 +159,7 @@ class PlatformJobExecutor:
         try:
             lookback_days = int(payload.get("lookback_days", 14))
             retry_minutes = int(payload.get("retry_minutes", 60))
+            recent_complete_days = int(payload.get("recent_complete_days", 7))
             limit = int(payload.get("limit", 500))
         except (TypeError, ValueError) as error:
             raise PermanentJobError("playhub.import_sweep settings must be integers") from error
@@ -172,6 +173,7 @@ class PlatformJobExecutor:
             event_ids = PlayHubMaintenanceService.from_engine(self.engine).due_event_import_ids(
                 lookback_days=lookback_days,
                 retry_minutes=retry_minutes,
+                recent_complete_days=recent_complete_days,
                 limit=limit,
             )
         except ValueError as error:

@@ -136,7 +136,12 @@ def test_discover_window_rejects_bad_payload(payload):
 def test_import_sweep_enqueues_each_due_event_with_occurrence_generation(monkeypatch):
     class Maintenance:
         def due_event_import_ids(self, **kwargs):
-            assert kwargs == {"lookback_days": 21, "retry_minutes": 90, "limit": 12}
+            assert kwargs == {
+                "lookback_days": 21,
+                "retry_minutes": 90,
+                "recent_complete_days": 7,
+                "limit": 12,
+            }
             return (101, 102, 103)
 
     monkeypatch.setattr(

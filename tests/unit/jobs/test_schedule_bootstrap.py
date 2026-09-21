@@ -46,8 +46,10 @@ def test_default_schedules_cover_shared_production_pipeline_without_account_spec
 
     import_sweep = definitions["playhub-import-sweep"]
 
+    assert import_sweep.schedule_spec == {"type": "interval", "seconds": 60 * 60}
     assert import_sweep.payload["lookback_days"] == 90
-    assert import_sweep.payload["retry_minutes"] == 180
+    assert import_sweep.payload["retry_minutes"] == 60
+    assert import_sweep.payload["recent_complete_days"] == 7
 
 
 def test_duels_schedule_is_connection_scoped_and_contains_no_secret(monkeypatch):

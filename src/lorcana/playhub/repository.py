@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import Connection
 
@@ -338,8 +338,34 @@ class PlayHubRepository:
         now: datetime,
         lookback_start: datetime,
         retry_before: datetime,
+        recent_complete_after: datetime,
         limit: int,
     ) -> tuple[int, ...]:
+        active_source_statuses = ("LIVE", "ACTIVE", "RUNNING", "STARTED", "IN_PROGRESS")
+        source_still_active = or_(
+            *(
+                func.upper(
+                    func.replace(func.replace(func.trim(column), "-", "_"), " ", "_")
+                ).in_(active_source_statuses)
+                for column in (
+                    playhub_events.c.display_status,
+                    playhub_events.c.event_status,
+                    playhub_events.c.lifecycle_status,
+                )
+            )
+        )
+        recently_active_or_ended = func.coalesce(
+            playhub_events.c.end_datetime, playhub_events.c.start_datetime
+        ) >= recent_complete_after
+        final_import_cutoff = playhub_events.c.end_datetime + timedelta(hours=2)
+        post_event_final_import_due = and_(
+            playhub_events.c.end_datetime.is_not(None),
+            final_import_cutoff <= now,
+            or_(
+                playhub_event_sync_state.c.last_attempt_at.is_(None),
+                playhub_event_sync_state.c.last_attempt_at < final_import_cutoff,
+            ),
+        )
         rows = connection.execute(
             select(playhub_events.c.event_id)
             .select_from(
@@ -352,8 +378,15 @@ class PlayHubRepository:
                 playhub_events.c.start_datetime.is_not(None),
                 playhub_events.c.start_datetime >= lookback_start,
                 playhub_events.c.start_datetime <= now,
-                playhub_event_sync_state.c.state.in_(
-                    ["discovered", "pending", "partial", "no_results", "failed"]
+                or_(
+                    playhub_event_sync_state.c.state.in_(
+                        ["discovered", "pending", "partial", "no_results", "failed"]
+                    ),
+                    and_(
+                        playhub_event_sync_state.c.state == "complete",
+                        recently_active_or_ended,
+                        or_(source_still_active, post_event_final_import_due),
+                    ),
                 ),
                 (
                     playhub_event_sync_state.c.last_attempt_at.is_(None)

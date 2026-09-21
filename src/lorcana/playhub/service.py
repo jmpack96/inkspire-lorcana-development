@@ -440,12 +440,15 @@ class PlayHubMaintenanceService:
         *,
         lookback_days: int = 14,
         retry_minutes: int = 60,
+        recent_complete_days: int = 7,
         limit: int = 500,
     ) -> tuple[int, ...]:
         if not 1 <= lookback_days <= 3650:
             raise ValueError("lookback_days must be between 1 and 3650")
         if retry_minutes < 1:
             raise ValueError("retry_minutes must be positive")
+        if not 1 <= recent_complete_days <= 30:
+            raise ValueError("recent_complete_days must be between 1 and 30")
         if not 1 <= limit <= 5000:
             raise ValueError("limit must be between 1 and 5000")
         now = self._now()
@@ -455,6 +458,7 @@ class PlayHubMaintenanceService:
                 now=now,
                 lookback_start=now - timedelta(days=lookback_days),
                 retry_before=now - timedelta(minutes=retry_minutes),
+                recent_complete_after=now - timedelta(days=recent_complete_days),
                 limit=limit,
             )
 
