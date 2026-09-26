@@ -14,8 +14,9 @@ from sqlalchemy.engine import Connection, Engine
 
 from lorcana.db.schema.identity import member_playhub_links, members, team_memberships, teams
 from lorcana.db.schema.notifications import discord_live_event_announcements
-from lorcana.db.schema.playhub import playhub_events, playhub_registrations
+from lorcana.db.schema.playhub import playhub_event_sync_state, playhub_events, playhub_registrations
 from lorcana.db.tx import transaction
+from lorcana.playhub.status import event_is_in_progress_clause
 
 ConnectionFactory = Callable[[], ContextManager[Connection]]
 
@@ -65,14 +66,6 @@ def event_date_is_current(
     ).date()
 
 
-def _live_status_clause():
-    return or_(
-        func.upper(func.trim(playhub_events.c.display_status)) == "LIVE",
-        func.upper(func.trim(playhub_events.c.event_status)) == "LIVE",
-        func.upper(func.trim(playhub_events.c.lifecycle_status)) == "LIVE",
-    )
-
-
 class LiveEventAlertRepository:
     @staticmethod
     def _team_events(team_slug: str):
@@ -98,24 +91,41 @@ class LiveEventAlertRepository:
         now: datetime,
         limit: int,
     ) -> tuple[int, ...]:
+        # Participants may not be imported yet. Scan current events independently
+        # of team joins, rotating through least-recently-attempted imports.
         rows = connection.execute(
             select(playhub_events.c.event_id)
-            .select_from(self._team_events(team_slug))
+            .select_from(playhub_events.outerjoin(
+                playhub_event_sync_state,
+                playhub_event_sync_state.c.event_id == playhub_events.c.event_id,
+            ))
             .where(
-                teams.c.slug == team_slug,
-                teams.c.status == "active",
-                members.c.status == "active",
-                team_memberships.c.ended_at.is_(None),
-                playhub_events.c.start_datetime.is_not(None),
-                playhub_events.c.end_datetime.is_not(None),
+                playhub_events.c.start_datetime >= now - timedelta(days=1),
                 playhub_events.c.start_datetime <= now,
                 playhub_events.c.end_datetime > now,
+                or_(
+                    playhub_event_sync_state.c.last_attempt_at.is_(None),
+                    playhub_event_sync_state.c.last_attempt_at <= now - timedelta(minutes=5),
+                ),
             )
-            .distinct()
-            .order_by(playhub_events.c.event_id)
+            .order_by(
+                playhub_event_sync_state.c.last_attempt_at.asc().nullsfirst(),
+                playhub_events.c.event_id,
+            )
             .limit(limit)
         ).scalars().all()
         return tuple(int(value) for value in rows)
+
+    def record_refresh_attempt(self, connection: Connection, *, event_id: int, now: datetime) -> None:
+        # Record before network I/O so repeated fetch failures cannot monopolize
+        # the bounded discovery batch. Preserve the import state and last success.
+        statement = pg_insert(playhub_event_sync_state).values(
+            event_id=event_id, state="discovered", last_attempt_at=now,
+        )
+        connection.execute(statement.on_conflict_do_update(
+            index_elements=[playhub_event_sync_state.c.event_id],
+            set_={"last_attempt_at": statement.excluded.last_attempt_at},
+        ))
 
     def eligible_events(
         self,
@@ -141,14 +151,14 @@ class LiveEventAlertRepository:
                 teams.c.status == "active",
                 members.c.status == "active",
                 team_memberships.c.ended_at.is_(None),
-                func.upper(func.trim(playhub_registrations.c.registration_status)) == "ACTIVE",
+                func.upper(func.trim(playhub_registrations.c.registration_status)).in_(("ACTIVE", "COMPLETE")),
                 playhub_registrations.c.last_synced >= fresh_after,
                 playhub_events.c.last_synced >= fresh_after,
                 playhub_events.c.start_datetime <= now,
                 playhub_events.c.end_datetime > now,
                 playhub_events.c.source_url.is_not(None),
                 func.length(func.trim(playhub_events.c.source_url)) > 0,
-                _live_status_clause(),
+                event_is_in_progress_clause(),
             )
             .distinct()
             .order_by(playhub_events.c.event_id)
@@ -275,6 +285,10 @@ class LiveEventAlertService:
                 now=self._now(),
                 limit=limit,
             )
+
+    def record_refresh_attempt(self, event_id: int) -> None:
+        with self.transaction_factory() as connection:
+            self.repository.record_refresh_attempt(connection, event_id=event_id, now=self._now())
 
     def reserve_eligible(self, team_slug: str, channel_id: int) -> int:
         now = self._now()

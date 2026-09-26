@@ -147,11 +147,30 @@ class PlayHubImportService:
                         parse_match(event_id, round_record.round_id, raw_match, observed_at=self._now())
                         for raw_match in raw_matches
                     )
+                    # Before the first standings are generated, pairings already
+                    # contain real registration IDs and registration statuses.
+                    # Use only the latest paired round; do not infer registration
+                    # status or overwrite ranked standings with older pairings.
+                    paired_registrations = None
+                    if standings_round is None and round_record == match_rounds[-1]:
+                        paired_registrations = parse_standings(
+                            event_id,
+                            [relationship for match in raw_matches
+                             for relationship in (match.get("player_match_relationships") or [])],
+                            observed_at=self._now(),
+                        )
                     with self.transaction_factory() as connection:
+                        if paired_registrations is not None:
+                            for player in paired_registrations.players:
+                                self.repository.upsert_player(connection, player)
+                            for registration in paired_registrations.registrations:
+                                self.repository.upsert_registration(connection, registration)
                         for parsed in parsed_matches:
                             for player in parsed.players:
                                 self.repository.upsert_player(connection, player)
                             self.repository.upsert_match(connection, parsed.match)
+                    if paired_registrations is not None:
+                        registrations_found += len(paired_registrations.registrations)
                     rounds_imported += 1
                     matches_found += len(parsed_matches)
                 except Exception:

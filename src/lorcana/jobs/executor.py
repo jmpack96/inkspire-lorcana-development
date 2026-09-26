@@ -270,10 +270,12 @@ class PlatformJobExecutor:
         event_ids = alerts.potential_event_ids(settings.discord_team_slug)
         refreshed = 0
         refresh_failures = 0
+        queued = alerts.reserve_eligible(settings.discord_team_slug, settings.live_event_channel_id)
         client = PlayHubClient()
         try:
             importer = PlayHubImportService.from_engine(self.engine, client=client)
             for event_id in event_ids:
+                alerts.record_refresh_attempt(event_id)
                 try:
                     importer.import_event(event_id)
                     refreshed += 1
@@ -281,12 +283,13 @@ class PlatformJobExecutor:
                     # Strict freshness checks prevent stale data from announcing.
                     refresh_failures += 1
                     continue
+                # Reserve promptly: later imports must not age this event past
+                # the ten-minute freshness window before it can be announced.
+                queued += alerts.reserve_eligible(
+                    settings.discord_team_slug, settings.live_event_channel_id,
+                )
         finally:
             client.close()
-        queued = alerts.reserve_eligible(
-            settings.discord_team_slug,
-            settings.live_event_channel_id,
-        )
         return {
             "enabled": True,
             "candidates": len(event_ids),

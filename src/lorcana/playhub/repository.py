@@ -21,6 +21,7 @@ from lorcana.db.schema.playhub import (
     playhub_rounds,
     playhub_stores,
 )
+from lorcana.playhub.status import event_is_in_progress_clause
 from lorcana.playhub.types import (
     PlayHubEvent,
     PlayHubMatch,
@@ -341,19 +342,7 @@ class PlayHubRepository:
         recent_complete_after: datetime,
         limit: int,
     ) -> tuple[int, ...]:
-        active_source_statuses = ("LIVE", "ACTIVE", "RUNNING", "STARTED", "IN_PROGRESS")
-        source_still_active = or_(
-            *(
-                func.upper(
-                    func.replace(func.replace(func.trim(column), "-", "_"), " ", "_")
-                ).in_(active_source_statuses)
-                for column in (
-                    playhub_events.c.display_status,
-                    playhub_events.c.event_status,
-                    playhub_events.c.lifecycle_status,
-                )
-            )
-        )
+        source_still_active = event_is_in_progress_clause()
         recently_active_or_ended = func.coalesce(
             playhub_events.c.end_datetime, playhub_events.c.start_datetime
         ) >= recent_complete_after

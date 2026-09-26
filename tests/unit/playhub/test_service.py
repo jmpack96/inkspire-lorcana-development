@@ -180,3 +180,31 @@ def test_retry_is_idempotent_for_source_entities_but_keeps_attempt_history():
     assert len(repository.registrations) == 2
     assert len(repository.matches) == 1
     assert len(repository.attempts) == 2
+
+
+def test_first_round_pairings_supply_real_registrations_before_standings():
+    repository = FakeRepository()
+    event = raw_event()
+    first_round = event["tournament_phases"][0]["rounds"][0]
+    first_round.update(status="IN_PROGRESS", standings_status="NOT_GENERATED")
+    match = raw_match()
+    match["status"] = "IN_PROGRESS"
+    for relationship, standing in zip(match["player_match_relationships"], raw_standings()):
+        relationship["user_event_status"] = dict(standing["user_event_status"], registration_status="COMPLETE")
+    client = FakeClient(matches={101: [match]})
+    result = service(client, repository, [UUID(int=1)]).import_event(1, event_data=event)
+    assert not client.standings_calls
+    assert result.registrations_found == 2
+    assert {r.registration_status for r in repository.registrations.values()} == {"COMPLETE"}
+    assert {r.last_synced for r in repository.registrations.values()} == {NOW}
+
+
+def test_pairings_do_not_replace_existing_ranked_standings():
+    repository = FakeRepository()
+    match = raw_match()
+    for relationship, standing in zip(match["player_match_relationships"], raw_standings()):
+        relationship["user_event_status"] = dict(standing["user_event_status"], matches_won=99)
+    client = FakeClient(standings={101: raw_standings()}, matches={101: [match]})
+    service(client, repository, [UUID(int=1)]).import_event(1, event_data=raw_event())
+    assert repository.registrations[1001].placement == 1
+    assert repository.registrations[1001].matches_won == 1

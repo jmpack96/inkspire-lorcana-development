@@ -215,3 +215,35 @@ def test_job_pruning_is_bounded_and_keeps_recent_operational_history():
 def test_job_pruning_rejects_unsafe_bounds(payload):
     with pytest.raises(PermanentJobError):
         bare_executor()._prune_jobs(payload)
+
+
+def test_live_scan_records_attempts_and_reserves_immediately_after_each_refresh(monkeypatch):
+    from types import SimpleNamespace
+    from lorcana.config import Settings
+    calls = []
+    class Alerts:
+        def potential_event_ids(self, team):
+            return (1, 2, 3)
+        def record_refresh_attempt(self, event_id):
+            calls.append(("attempt", event_id))
+        def reserve_eligible(self, team, channel):
+            calls.append(("reserve",))
+            return 1
+    class Importer:
+        def import_event(self, event_id):
+            calls.append(("import", event_id))
+            if event_id == 2:
+                raise RuntimeError("network failure")
+    class Client:
+        def close(self):
+            calls.append(("close",))
+    monkeypatch.setattr(Settings, "from_env", classmethod(lambda cls: SimpleNamespace(
+        live_event_channel_id=123, discord_team_slug="inkspire")))
+    monkeypatch.setattr(executor_module.LiveEventAlertService, "from_engine", classmethod(lambda cls, engine: Alerts()))
+    monkeypatch.setattr(executor_module.PlayHubImportService, "from_engine", classmethod(lambda cls, engine, client: Importer()))
+    monkeypatch.setattr(executor_module, "PlayHubClient", Client)
+    result = bare_executor()._scan_live_events()
+    assert result == dict(enabled=True, candidates=3, refreshed=2, refresh_failures=1, queued=3)
+    assert calls == [("reserve",), ("attempt", 1), ("import", 1), ("reserve",),
+                     ("attempt", 2), ("import", 2), ("attempt", 3), ("import", 3),
+                     ("reserve",), ("close",)]
