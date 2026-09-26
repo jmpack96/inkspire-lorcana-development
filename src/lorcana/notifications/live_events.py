@@ -91,9 +91,33 @@ class LiveEventAlertRepository:
         now: datetime,
         limit: int,
     ) -> tuple[int, ...]:
-        # Participants may not be imported yet. Scan current events independently
-        # of team joins, rotating through least-recently-attempted imports.
-        rows = connection.execute(
+        # Known team events get first priority so they cannot be starved by the
+        # global discovery rotation and age past the strict freshness window.
+        team_rows = connection.execute(
+            select(playhub_events.c.event_id)
+            .select_from(self._team_events(team_slug))
+            .where(
+                teams.c.slug == team_slug,
+                teams.c.status == "active",
+                members.c.status == "active",
+                team_memberships.c.ended_at.is_(None),
+                playhub_events.c.start_datetime >= now - timedelta(days=1),
+                playhub_events.c.start_datetime <= now,
+                playhub_events.c.end_datetime > now,
+            )
+            .distinct()
+            .order_by(playhub_events.c.event_id)
+            .limit(limit)
+        ).scalars().all()
+        team_ids = tuple(int(value) for value in team_rows)
+
+        remaining = max(0, limit - len(team_ids))
+        if remaining == 0:
+            return team_ids
+
+        # Participants may not be imported yet for other events. Use the
+        # remaining budget to rotate through current events globally.
+        discovery_query = (
             select(playhub_events.c.event_id)
             .select_from(playhub_events.outerjoin(
                 playhub_event_sync_state,
@@ -112,9 +136,15 @@ class LiveEventAlertRepository:
                 playhub_event_sync_state.c.last_attempt_at.asc().nullsfirst(),
                 playhub_events.c.event_id,
             )
-            .limit(limit)
-        ).scalars().all()
-        return tuple(int(value) for value in rows)
+            .limit(remaining)
+        )
+        if team_ids:
+            discovery_query = discovery_query.where(
+                playhub_events.c.event_id.not_in(team_ids)
+            )
+
+        discovery_rows = connection.execute(discovery_query).scalars().all()
+        return team_ids + tuple(int(value) for value in discovery_rows)
 
     def record_refresh_attempt(self, connection: Connection, *, event_id: int, now: datetime) -> None:
         # Record before network I/O so repeated fetch failures cannot monopolize
