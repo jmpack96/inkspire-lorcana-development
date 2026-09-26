@@ -192,7 +192,7 @@ class DiscordApplication:
             )
         return DiscordResponse(embeds=set_championship_views(set_name, events))
 
-    def coach_request(self, discord_user_id: int, game_id: str) -> DiscordResponse:
+    def coach_request(self, discord_user_id: int, game_id: str, turn: int | None = None) -> DiscordResponse:
         if self.identity is None or self.coach_requests is None:
             return DiscordResponse(
                 content="Coach analysis is not configured on this bot yet.",
@@ -205,7 +205,8 @@ class DiscordApplication:
                 ephemeral=True,
             )
         try:
-            result = self.coach_requests.request(member_id=member.member_id, game_id=game_id)
+            options = {"analysis_config": {"review_turns": [turn]}} if turn is not None else {}
+            result = self.coach_requests.request(member_id=member.member_id, game_id=game_id, **options)
         except CoachRequestError as error:
             return DiscordResponse(content=str(error), ephemeral=True)
         state = "Queued" if result.created else "Already queued or completed"

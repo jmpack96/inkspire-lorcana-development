@@ -89,8 +89,7 @@ def _render_report(summary: str, findings: tuple[CoachFindingDraft, ...], rules:
         if finding.evidence_action_ids:
             evidence.append("actions " + ", ".join(str(value) for value in finding.evidence_action_ids))
         lines.append(
-            f"**Evidence:** {'; '.join(evidence)} · **Confidence:** {finding.confidence:.0%} · "
-            f"**Type:** {finding.claim_type}"
+            f"**Evidence:** {'; '.join(evidence)} · **Assessment:** model-generated; not independently verified"
         )
         refs = finding.payload.get("rule_citations", [])
         if refs:
@@ -431,6 +430,13 @@ class CoachService:
             result = analyzer.analyze(analyzer_input)
             self._validate_analyzer_result(result, analyzer_input)
             report_content = _render_report(result.summary, result.findings, analyzer_input.get("rules"))
+            if result.usage and result.usage.get("review_scope"):
+                scope = result.usage["review_scope"]
+                stats = result.usage.get("recorded_statistics", {})
+                report_content = ("**Partial review — turns " + ", ".join(map(str, scope["selected_turns"]))
+                    + ".** " + scope["limitation"] + "\n\n"
+                    + "**Recorded player actions across this replay (counts, not quality judgments):** "
+                    + ", ".join(f"{key}: {value}" for key, value in stats.items()) + "\n\n" + report_content)
             completed_at = self._now()
             finding_rows = []
             for ordinal, finding in enumerate(result.findings, start=1):

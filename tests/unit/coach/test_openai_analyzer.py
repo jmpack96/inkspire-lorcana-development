@@ -67,7 +67,7 @@ def test_openai_analyzer_uses_private_strict_structured_response_request():
     session = FakeSession([FakeResponse(200, completed_payload())])
     analyzer = OpenAIResponsesCoachAnalyzer(
         api_key="sk-test-secret",
-        model="gpt-test",
+        model="gpt-5.4",
         session=session,
     )
 
@@ -75,43 +75,32 @@ def test_openai_analyzer_uses_private_strict_structured_response_request():
 
     assert result.summary.startswith("Good recovery")
     assert result.findings[0].evidence_action_ids == (4,)
-    assert result.usage == {"input_tokens": 123, "output_tokens": 45}
+    assert result.usage["input_tokens"] == 123
+    assert result.usage["review_budget"]["allowed"]
     assert len(session.calls) == 1
     url, kwargs = session.calls[0]
     assert url == OPENAI_RESPONSES_URL
     assert kwargs["headers"]["Authorization"] == "Bearer sk-test-secret"
     assert kwargs["json"]["store"] is False
-    assert kwargs["json"]["model"] == "gpt-test"
+    assert kwargs["json"]["model"] == "gpt-5.4"
     assert kwargs["json"]["text"]["format"]["type"] == "json_schema"
     assert kwargs["json"]["text"]["format"]["strict"] is True
     assert kwargs["json"]["text"]["format"]["schema"]["additionalProperties"] is False
 
 
-def test_openai_analyzer_retries_429_then_succeeds():
-    session = FakeSession([
-        FakeResponse(429, {}),
-        FakeResponse(200, completed_payload()),
-    ])
-    sleeps = []
-    analyzer = OpenAIResponsesCoachAnalyzer(
-        api_key="secret",
-        model="gpt-test",
-        session=session,
-        sleeper=sleeps.append,
-    )
-
-    result = analyzer.analyze(grounded_evidence())
-
-    assert result.findings[0].category == "sequencing"
-    assert len(session.calls) == 2
-    assert sleeps == [1]
+def test_openai_analyzer_does_not_retry_429_by_default():
+    session = FakeSession([FakeResponse(429, {})])
+    analyzer = OpenAIResponsesCoachAnalyzer(api_key="secret", model="gpt-5.4", session=session)
+    with pytest.raises(OpenAIAnalyzerError, match="429"):
+        analyzer.analyze(grounded_evidence())
+    assert len(session.calls) == 1
 
 
 def test_openai_analyzer_does_not_retry_non_transient_4xx_or_echo_body():
     session = FakeSession([FakeResponse(400, {"error": "sensitive provider body"})])
     analyzer = OpenAIResponsesCoachAnalyzer(
         api_key="secret",
-        model="gpt-test",
+        model="gpt-5.4",
         session=session,
     )
 
@@ -128,7 +117,7 @@ def test_openai_analyzer_rejects_refusal_and_invalid_json():
         "output": [{"type": "message", "content": [{"type": "refusal", "refusal": "no"}]}],
     }
     analyzer = OpenAIResponsesCoachAnalyzer(
-        api_key="secret", model="gpt-test", session=FakeSession([FakeResponse(200, refusal)])
+        api_key="secret", model="gpt-5.4", session=FakeSession([FakeResponse(200, refusal)])
     )
     with pytest.raises(OpenAIAnalyzerError, match="refused"):
         analyzer.analyze(grounded_evidence())
@@ -138,7 +127,7 @@ def test_openai_analyzer_rejects_refusal_and_invalid_json():
         "output": [{"type": "message", "content": [{"type": "output_text", "text": "not-json"}]}],
     }
     analyzer = OpenAIResponsesCoachAnalyzer(
-        api_key="secret", model="gpt-test", session=FakeSession([FakeResponse(200, invalid)])
+        api_key="secret", model="gpt-5.4", session=FakeSession([FakeResponse(200, invalid)])
     )
     with pytest.raises(OpenAIAnalyzerError, match="valid JSON"):
         analyzer.analyze(grounded_evidence())
@@ -151,25 +140,26 @@ def test_openai_analyzer_close_only_closes_owned_session(monkeypatch):
 
     owned = OwnedSession()
     monkeypatch.setattr("lorcana.coach.openai_analyzer.requests.Session", lambda: owned)
-    analyzer = OpenAIResponsesCoachAnalyzer(api_key="secret", model="gpt-test")
+    analyzer = OpenAIResponsesCoachAnalyzer(api_key="secret", model="gpt-5.4")
     analyzer.close()
     assert owned.closed is True
 
     injected = FakeSession([])
-    analyzer = OpenAIResponsesCoachAnalyzer(api_key="secret", model="gpt-test", session=injected)
+    analyzer = OpenAIResponsesCoachAnalyzer(api_key="secret", model="gpt-5.4", session=injected)
     analyzer.close()
     assert injected.closed is False
 
 
 def grounded_evidence():
-    return {"normalization": {"effective_actions": [{"seq": 4}]},
-            "rules": {"status": "available", "citations": {"CR:test:p1": {"text": "test"}}},
-            "catalog": {"facts": {}, "missing_card_ids": []}}
+    return {"normalization": {"effective_actions": [{"seq": 4, "gameplay_turn": 2,
+            "actor_is_perspective": True, "type": "play", "card_id": "3-16"}]},
+            "rules": {"status": "available", "citations": {"CR:test:p1": {"text": "drawing cards before another action"}}},
+            "catalog": {"facts": {"3-16": {"name": "Fixture", "rules_text": "drawing cards"}}, "missing_card_ids": []}}
 
 
 def test_missing_rules_or_cards_blocks_before_network_request():
     session = FakeSession([])
-    analyzer = OpenAIResponsesCoachAnalyzer(api_key="secret", model="test", session=session)
+    analyzer = OpenAIResponsesCoachAnalyzer(api_key="secret", model="gpt-5.4", session=session)
     with pytest.raises(OpenAIAnalyzerError, match="rules reference"):
         analyzer.analyze({})
     evidence = grounded_evidence()
@@ -184,7 +174,25 @@ def test_model_cannot_publish_invented_rule_citation():
     value = json.loads(payload["output"][0]["content"][0]["text"])
     value["findings"][0]["rule_citations"] = ["CR:fake:p999"]
     payload["output"][0]["content"][0]["text"] = json.dumps(value)
-    analyzer = OpenAIResponsesCoachAnalyzer(api_key="secret", model="test",
+    analyzer = OpenAIResponsesCoachAnalyzer(api_key="secret", model="gpt-5.4",
         session=FakeSession([FakeResponse(200, payload)]))
     with pytest.raises(OpenAIAnalyzerError, match="unavailable rule"):
         analyzer.analyze(grounded_evidence())
+
+
+def test_oversize_selected_evidence_is_blocked_before_paid_call():
+    from lorcana.coach.review_plan import ReviewBlocked
+    session = FakeSession([])
+    analyzer = OpenAIResponsesCoachAnalyzer(api_key="secret", model="gpt-5.4", session=session)
+    evidence = grounded_evidence()
+    evidence["rules"]["citations"]["CR:test:p1"]["text"] = "drawing " * 30000
+    with pytest.raises(ReviewBlocked, match="before API call"):
+        analyzer.analyze(evidence)
+    assert session.calls == []
+
+
+def test_model_output_schema_has_no_confidence_or_fact_option():
+    from lorcana.coach.openai_analyzer import OUTPUT_SCHEMA
+    properties = OUTPUT_SCHEMA["properties"]["findings"]["items"]["properties"]
+    assert "confidence" not in properties
+    assert properties["claim_type"]["enum"] == ["inference"]

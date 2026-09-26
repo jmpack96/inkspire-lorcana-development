@@ -538,12 +538,13 @@ def create_bot(resources: ApplicationResources):
 
     @bot.tree.command(name="coach", description="Queue a private Coach analysis for one of your Duels games.")
     @app_commands.describe(game_id="Duels game ID")
-    async def coach(interaction: discord.Interaction, game_id: str) -> None:
+    async def coach(interaction: discord.Interaction, game_id: str, turn: int | None = None) -> None:
         await execute(
             interaction,
             application.coach_request,
             int(interaction.user.id),
             game_id,
+            turn,
             ephemeral=True,
         )
 

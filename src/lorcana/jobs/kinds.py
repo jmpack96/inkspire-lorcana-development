@@ -141,7 +141,7 @@ def enqueue_coach_analysis(
         payload=payload,
         idempotency_key=f"{COACH_ANALYZE_REPLAY}:{digest}",
         priority=8,
-        max_attempts=3,
+        max_attempts=1,
     )
 
 

@@ -395,6 +395,13 @@ class PlatformJobExecutor:
                 analysis_config=analysis_config,
                 restart_running=restart_running,
             )
+        except Exception as error:
+            from lorcana.coach.openai_analyzer import OpenAIAnalyzerError
+            from lorcana.coach.service import CoachError
+            from lorcana.coach.review_plan import ReviewBlocked
+            if isinstance(error, (OpenAIAnalyzerError, ReviewBlocked, CoachError)):
+                raise PermanentJobError(str(error)) from error
+            raise PermanentJobError("Coach run failed; inspect before retrying: " + type(error).__name__) from error
         finally:
             close = getattr(analyzer, "close", None)
             if callable(close):

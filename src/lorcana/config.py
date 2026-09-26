@@ -48,7 +48,7 @@ class Settings:
     coach_analyzer_generation: str = "v1"
     coach_rules_bundle: Path | None = None
     openai_api_key: str | None = field(default=None, repr=False)
-    openai_coach_model: str = "gpt-5.6-terra"
+    openai_coach_model: str = "gpt-5.4"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -92,11 +92,11 @@ class Settings:
         openai_api_key = source.get("OPENAI_API_KEY")
         if openai_api_key is not None and not openai_api_key.strip():
             raise ConfigurationError("OPENAI_API_KEY must not be empty")
-        openai_coach_model = source.get("OPENAI_COACH_MODEL", "gpt-5.6-terra").strip()
+        openai_coach_model = source.get("OPENAI_COACH_MODEL", "gpt-5.4").strip()
         if not openai_coach_model:
             raise ConfigurationError("OPENAI_COACH_MODEL must not be empty")
         default_generation = (
-            f"{openai_coach_model}:lorcana_coach_v4_tournament_references"
+            f"{openai_coach_model}:lorcana_coach_v5_bounded"
             if coach_analyzer_name == "openai" else "v1"
         )
         coach_analyzer_generation = source.get(

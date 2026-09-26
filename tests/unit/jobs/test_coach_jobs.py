@@ -47,7 +47,7 @@ def test_enqueue_coach_analysis_is_deterministic_and_never_contains_credentials(
     assert first["idempotency_key"] == second["idempotency_key"]
     assert first["payload"]["analyzer_name"] == "primary"
     assert "token" not in str(first["payload"]).lower()
-    assert first["max_attempts"] == 3
+    assert first["max_attempts"] == 1
 
 
 def test_enqueue_coach_analysis_rejects_blank_analyzer_name():

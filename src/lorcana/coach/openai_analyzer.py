@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import time
 from typing import Any, Callable, Mapping
@@ -11,7 +12,7 @@ import requests
 from lorcana.coach.types import CoachAnalyzerResult, CoachFindingDraft
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
-PROMPT_VERSION = "lorcana_coach_v4_tournament_references"
+PROMPT_VERSION = "lorcana_coach_v5_bounded"
 
 
 class OpenAIAnalyzerError(RuntimeError):
@@ -30,7 +31,7 @@ OUTPUT_SCHEMA = {
                 "type": "object",
                 "additionalProperties": False,
                 "required": [
-                    "category", "impact", "confidence", "claim_type",
+                    "category", "impact", "claim_type",
                     "observation", "recommendation", "evidence_action_ids",
                     "evidence_turns", "claim_basis", "rule_citations", "card_citations",
                 ],
@@ -40,8 +41,7 @@ OUTPUT_SCHEMA = {
                     "card_citations": {"type": "array", "items": {"type": "string"}},
                     "category": {"type": "string"},
                     "impact": {"type": "string", "enum": ["low", "medium", "high"]},
-                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                    "claim_type": {"type": "string", "enum": ["fact", "inference"]},
+                    "claim_type": {"type": "string", "enum": ["inference"]},
                     "observation": {"type": "string"},
                     "recommendation": {"type": "string"},
                     "evidence_action_ids": {"type": "array", "items": {"type": "integer"}},
@@ -53,6 +53,12 @@ OUTPUT_SCHEMA = {
 }
 
 INSTRUCTIONS = """You are a competitive Disney Lorcana gameplay coach.
+Review ONLY the selected turns, not the whole game. Do not rank a turn as the best
+or worst in the game. All generated findings are interpretations, never verified facts.
+Do not give confidence percentages. Retrieved rule pages may omit exceptions: omit
+advice when applicability cannot be established. Honor duration_facts: an effect that
+expires at the start of your next turn cannot increase lore when questing that turn.
+Never infer whether a snapshot is before or after an action when that is unspecified.
 Analyze only the evidence supplied by the application. The normalized actions are the
 undo-adjusted effective line. Never treat an action absent from effective_actions as a
 mistake that actually occurred. Card colors, costs, inkability, rules text, types, and
@@ -117,15 +123,15 @@ class OpenAIResponsesCoachAnalyzer:
         session: requests.Session | None = None,
         rules_bundle: dict | None = None,
         timeout_seconds: float = 120.0,
-        max_attempts: int = 3,
-        max_output_tokens: int = 6000,
+        max_attempts: int = 1,
+        max_output_tokens: int = 1200,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
         if not api_key.strip():
             raise ValueError("OpenAI api_key must not be empty")
         if not model.strip():
             raise ValueError("OpenAI model must not be empty")
-        if timeout_seconds <= 0 or max_attempts < 1 or max_output_tokens < 500:
+        if timeout_seconds <= 0 or max_attempts != 1 or max_output_tokens < 500:
             raise ValueError("Invalid OpenAI analyzer request limits")
         self.rules_bundle = rules_bundle
         self.api_key = api_key
@@ -146,23 +152,12 @@ class OpenAIResponsesCoachAnalyzer:
             raise OpenAIAnalyzerError("A dated official rules reference is required before analysis")
         if evidence.get("catalog", {}).get("missing_card_ids"):
             raise OpenAIAnalyzerError("Resolve missing card identities before analysis")
-        request_body = {
-            "model": self.model,
-            "instructions": INSTRUCTIONS,
-            "input": json.dumps(evidence, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": "lorcana_coach_report",
-                    "strict": True,
-                    "schema": OUTPUT_SCHEMA,
-                }
-            },
-            # Replay evidence is private member data; do not persist the API
-            # response server-side merely for retrieval convenience.
-            "store": False,
-            "max_output_tokens": self.max_output_tokens,
-        }
+        from lorcana.coach.review_plan import prepare_review, request_budget, ReviewBlocked
+        evidence = prepare_review(evidence, (evidence.get("analysis_config") or {}).get("review_turns"))
+        request_body = self.request_body(evidence)
+        budget = request_budget(request_body)
+        if not budget["allowed"]:
+            raise ReviewBlocked(f"Request blocked before API call: estimated upper cost ${budget['estimated_upper_cost_usd']:.4f} exceeds the ${budget['limit_usd']:.2f} limit; select a smaller decision")
         payload = self._request(request_body)
         if payload.get("status") not in {None, "completed"}:
             reason = payload.get("incomplete_details") or payload.get("error") or payload.get("status")
@@ -179,7 +174,30 @@ class OpenAIResponsesCoachAnalyzer:
                 validate_finding_grounding(finding, evidence)
         except ValueError as error:
             raise OpenAIAnalyzerError(str(error)) from error
-        return result
+        from lorcana.coach.review_plan import validate_generated_advice
+        validate_generated_advice(result, evidence)
+        return replace(result, usage={**(result.usage or {}), "review_budget": budget,
+            "review_scope": evidence["review_scope"], "recorded_statistics": evidence["recorded_statistics"],
+            "selected_rule_citations": sorted(evidence["rules"]["citations"])})
+
+    def request_body(self, evidence):
+        return {
+            "model": self.model,
+            "instructions": INSTRUCTIONS,
+            "input": json.dumps(evidence, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "lorcana_coach_report",
+                    "strict": True,
+                    "schema": OUTPUT_SCHEMA,
+                }
+            },
+            # Replay evidence is private member data; do not persist the API
+            # response server-side merely for retrieval convenience.
+            "store": False,
+            "max_output_tokens": self.max_output_tokens,
+        }
 
     def _request(self, body: Mapping[str, Any]) -> dict[str, Any]:
         last_error: Exception | None = None
@@ -249,13 +267,13 @@ def _parse_result(value: Any, usage: Any) -> CoachAnalyzerResult:
             parsed_findings.append(CoachFindingDraft(
                 category=str(item["category"]),
                 impact=str(item["impact"]),
-                confidence=float(item["confidence"]),
+                confidence=0.0,  # Legacy database field: unscored, never displayed.
                 claim_type=str(item["claim_type"]),
                 observation=str(item["observation"]),
                 recommendation=str(item["recommendation"]),
                 evidence_action_ids=tuple(int(v) for v in item["evidence_action_ids"]),
                 evidence_turns=tuple(int(v) for v in item["evidence_turns"]),
-                payload={"claim_basis": item["claim_basis"],
+                payload={"confidence_status": "unscored", "claim_basis": item["claim_basis"],
                          "rule_citations": item["rule_citations"],
                          "card_citations": item["card_citations"]},
             ))
