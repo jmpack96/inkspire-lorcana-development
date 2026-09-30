@@ -73,7 +73,7 @@ def test_player_team_color_filters_and_queues_stay_separate():
               r.result(queue_id=None, queue_name=None), r.result(ranked=False)]
     report = service(r).report(123, team=True, opponent="Emerald/Steel")
     assert len(report["rows"]) == 5
-    assert any(x["ours"] == "Amber/Steel" and x["player"] == "Michael" for x in report["rows"])
+    assert any(x["ours"] == "Amber/Steel" for x in report["rows"])
     first = report["rows"][0]
     assert first["win"] == 4 and first["loss"] == 2
     assert "Infinity" in first["queue"]
@@ -115,7 +115,7 @@ def test_pages_are_short_and_application_is_private():
     r.rows = [r.result(queue_id=f"core-{i}", queue_name=f"Core {i}") for i in range(14)]
     app = DiscordApplication(ratings=None, playhub=None, teams=None, matchups=service(r))
     response = app.matchup_report(123, team=True)
-    assert not response.ephemeral and len(response.embeds) == 3
+    assert not response.ephemeral and len(response.embeds) == 2
     assert app.matchup_report(123).ephemeral
     assert app.matchup_report(123, player=str(r.b)).ephemeral
     assert app.matchup_report(123, team=True, opponent="invalid").ephemeral
@@ -123,3 +123,73 @@ def test_pages_are_short_and_application_is_private():
     assert "Test current set" in response.embeds[0].description
     assert app.matchup_report(123, player="invalid").ephemeral
     assert len(app.matchup_players(123)) == 2
+
+
+def test_team_table_condenses_rows_without_combining_queue_records():
+    r = Repository()
+    r.rows = [r.result(), r.result(result="loss", games=2),
+              r.result(result="draw", games=1), r.result(result=None, games=1),
+              r.result(member_id=r.b, games=3),
+              r.result(queue_id="core-bo1", queue_name="Core", games=5)]
+    report = service(r).report(123, team=True)
+    pages = matchup_views(report)
+    assert len(pages) == 1
+    infinity = pages[0].description
+    assert not pages[0].fields
+    assert "Ru/Sa" in infinity and "Em/St" in infinity
+    assert "7-2-1" in infinity and "70%" in infinity
+    # N counts unknowns too; the separate ? column makes the denominator clear.
+    assert next(line for line in infinity.splitlines() if line.startswith("Ru/Sa")).split() == ["Ru/Sa", "Em/St", "7-2-1", "70%", "11", "1"]
+    assert "player" not in report["rows"][0]
+    assert "Jacob" not in infinity
+    assert "Player" not in infinity
+    assert "Core" in infinity
+    assert infinity.count("```") == 4
+    assert "Am Amber" in infinity and "Ay Amethyst" in infinity
+
+
+def test_team_tables_paginate_fit_discord_and_sanitize_labels():
+    r = Repository()
+    r.rows = [r.result(your_deck_colors=[a, b], games=i + 1)
+              for i, (a, b) in enumerate(pair.split("/") for pair in COLOR_PAIRS)]
+    report = service(r).report(123, team=True)
+    report["period"]["name"] = "@everyone\n```\t" + "x" * 100
+    report["rows"][0].update(ours="Unknown", win=0, loss=0, draw=0, unknown=16)
+    pages = matchup_views(report)
+    assert len(pages) == 2
+    assert sum(len(p.description.split("```\n")[1].split("\n```", 1)[0].splitlines()) - 1
+               for p in pages) == 15
+    assert "—" in pages[0].description and "?" in pages[0].description
+    for page in pages:
+        assert page.description.count("```") == 2
+        assert "@everyone" not in page.description
+        assert len(page.description) <= 4096
+        assert len(page.title) + len(page.description) + len(page.footer) < 6000
+
+
+def test_empty_team_report_has_no_empty_table():
+    report = service(Repository()).report(123, team=True)
+    pages = matchup_views(report)
+    assert len(pages) == 1
+    assert "No matching synced games" in pages[0].description
+    assert "```" not in pages[0].description
+
+
+def test_team_totals_are_weighted_and_player_reports_stay_individual():
+    r = Repository()
+    r.rows = [r.result(games=9), r.result(result="loss", games=1),
+              r.result(member_id=r.b, result="loss", games=2),
+              r.result(member_id=r.b, result=None, games=3),
+              r.result(member_id=r.b, team_observers=2, games=4)]
+    combined = service(r).report(123, team=True, opponent="Emerald/Steel")
+    assert len(combined["rows"]) == 1
+    totals = combined["rows"][0]
+    assert (totals["win"], totals["loss"], totals["draw"], totals["unknown"]) == (9, 3, 0, 3)
+    assert combined["internal"] == 4
+    assert "75%" in matchup_views(combined)[0].description
+    jacob = service(r).report(123)
+    michael = service(r).report(123, player=str(r.b))
+    assert jacob["rows"][0]["player"] == "Jacob"
+    assert (jacob["rows"][0]["win"], jacob["rows"][0]["loss"]) == (9, 1)
+    assert michael["rows"][0]["player"] == "Michael"
+    assert michael["rows"][0]["loss"] == 2

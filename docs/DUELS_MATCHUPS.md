@@ -8,17 +8,26 @@ new package, AI key, or AI analyzer is required.
 
 - `/player-matchups`: your current-set results.
 - `/player-matchups player:`: select a teammate from the autocomplete list.
-- `/team-matchups`: individual matchup records for the active team.
+- `/team-matchups`: combined matchup records across the active team.
 - Either command: optionally select `opponent_colors`, such as Emerald/Steel.
 
 The player option uses the internal active roster, so players do not need a
 Play Hub rating or a published Elo run to appear. Omit it for yourself. Do not
 enter a name without choosing the matching autocomplete result.
 
-Each row shows the player's own colors against the opponent's colors, W/L/D,
-win percentage, game count, and queue/format/ranked status. Most-played matchups
-appear first. Up to six rows display at once; use Next/Previous in the same
-message. Player reports are private; team reports are public in the invoking channel. Unknown outcomes are shown separately and excluded from win
+Each row shows played deck colors against opponent colors, W/L/D,
+win percentage, game count, and queue/format/ranked status. Team reports use
+compact monospace tables grouped by queue, with up to twelve rows per page.
+Team records pool all active members by played deck and opponent colors within
+each queue. Columns are Deck, Vs, W-L-D, Win%, and N (all games, including unknown
+outcomes). A separate `?` count appears when a table contains unknown outcomes.
+Ink abbreviations are explained below each page. Use `/player-matchups` for
+individual player results.
+Exact queue records stay separate, even when their displayed labels match.
+Most-played matchups appear first within each queue; queues follow their first
+appearance in the most-played results. Player reports retain six rows per page.
+Use Next/Previous in the same message. Player reports are private; team reports
+are public in the invoking channel. Unknown outcomes are shown separately and excluded from win
 percentage. Draws are included in the win-percentage denominator.
 
 ## Set period

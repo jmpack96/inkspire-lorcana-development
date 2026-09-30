@@ -146,8 +146,8 @@ class MatchupService:
             if r["team_observers"] > 1:
                 internal += r["games"]
                 continue
-            # Retain exact queue identity as well as the readable label.
-            key = (r["member_id"], ours, theirs, r.get("queue_id"), r.get("queue_name"),
+            # Pool team members for team reports; retain exact queue identity.
+            key = (None if team else r["member_id"], ours, theirs, r.get("queue_id"), r.get("queue_name"),
                    r.get("mode"), r.get("match_format"), r.get("ranked"))
             outcome = str(r["result"] or "").strip().lower()
             outcome = {"won": "win", "lost": "loss", "tie": "draw"}.get(outcome, outcome)
@@ -155,10 +155,11 @@ class MatchupService:
         rows = []
         for key, counts in grouped.items():
             member, ours, theirs, queue_id, queue_name, mode, match_format, ranked = key
-            rows.append({"player": names[member], "ours": ours, "theirs": theirs, **counts,
+            rows.append({**({"player": names[member]} if not team else {}),
+                         "ours": ours, "theirs": theirs, **counts,
                          "queue": queue_label(dict(queue_id=queue_id, queue_name=queue_name, mode=mode,
                                                     match_format=match_format, ranked=ranked))})
-        rows.sort(key=lambda r: (-sum(r[k] for k in ("win", "loss", "draw", "unknown")), r["player"], r["ours"], r["theirs"], r["queue"]))
+        rows.sort(key=lambda r: (-sum(r[k] for k in ("win", "loss", "draw", "unknown")), r.get("player", ""), r["ours"], r["theirs"], r["queue"]))
         expected = set(names) if team else {selected}
         linked = {r["member_id"] for r in coverage if r["member_id"] in expected}
         synced = {r["member_id"] for r in coverage if r["member_id"] in expected and r["last_sync"] is not None}

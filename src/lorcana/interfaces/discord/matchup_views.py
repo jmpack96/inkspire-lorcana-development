@@ -1,9 +1,85 @@
 """One compact matchup page at a time; no technical inputs or replay details."""
+from collections import defaultdict
+
 from lorcana.interfaces.discord.views import EmbedField, EmbedSpec
 
 
 def safe(value, length=100):
-    return str(value).replace("@", "＠").replace("`", "'").replace("\n", " ")[:length]
+    return " ".join(str(value).replace("@", "＠").replace("`", "'").split())[:length]
+
+
+INK_CODES = {"Amber": "Am", "Amethyst": "Ay", "Emerald": "Em",
+             "Ruby": "Ru", "Sapphire": "Sa", "Steel": "St", "Unknown": "?"}
+INK_LEGEND = "Am Amber · Ay Amethyst · Em Emerald · Ru Ruby · Sa Sapphire · St Steel · ? Unknown"
+
+
+def short_colors(value):
+    return "/".join(INK_CODES.get(color, "?") for color in str(value).split("/"))
+
+
+def team_table(rows):
+    """Aligned text for Discord's monospace code blocks."""
+    unknown = any(row["unknown"] for row in rows)
+    headers = ["Deck", "Vs", "W-L-D", "Win%", "N"]
+    if unknown:
+        headers.append("?")
+    cells = []
+    for row in rows:
+        decided = row["win"] + row["loss"] + row["draw"]
+        values = [short_colors(row["ours"]), short_colors(row["theirs"]),
+                  f"{row['win']}-{row['loss']}-{row['draw']}",
+                  f"{100 * row['win'] / decided:.0f}%" if decided else "—",
+                  str(decided + row["unknown"])]
+        if unknown:
+            values.append(str(row["unknown"]))
+        cells.append(values)
+    widths = [max(len(values[i]) for values in [headers, *cells]) for i in range(len(headers))]
+
+    def line(values):
+        return " ".join(value.ljust(widths[i]) if i < 2 else value.rjust(widths[i])
+                        for i, value in enumerate(values)).rstrip()
+
+    return "```\n" + "\n".join(line(values) for values in [headers, *cells]) + "\n```"
+
+
+def team_pages(report, description, footer):
+    # Keep each queue together without combining any separately counted records.
+    queues = defaultdict(list)
+    for row in report["rows"]:
+        queues[row["queue"]].append(row)
+    pages = []
+    sections = []
+    page_rows = 0
+    suffix = "\n" + INK_LEGEND
+
+    def page():
+        return EmbedSpec(safe(report["title"], 200),
+                         description + "\n" + "\n".join(sections) + suffix, footer=footer)
+
+    for queue, rows in queues.items():
+        heading = f"**{safe(queue, 180)}**\n"
+        offset = 0
+        while offset < len(rows):
+            count = min(12 - page_rows, len(rows) - offset)
+            section = heading + team_table(rows[offset:offset + count])
+            candidate = description + "\n" + "\n".join([*sections, section]) + suffix
+            while count > 1 and len(candidate) > 4096:
+                count -= 1
+                section = heading + team_table(rows[offset:offset + count])
+                candidate = description + "\n" + "\n".join([*sections, section]) + suffix
+            if sections and len(candidate) > 4096:
+                pages.append(page())
+                sections, page_rows = [], 0
+                continue
+            sections.append(section)
+            page_rows += count
+            offset += count
+            if page_rows == 12:
+                pages.append(page())
+                sections, page_rows = [], 0
+    if sections:
+        pages.append(page())
+    return tuple(pages)
 
 
 def matchup_views(report):
@@ -21,6 +97,11 @@ def matchup_views(report):
     rows = report["rows"]
     if not rows:
         return (EmbedSpec(safe(report["title"], 200), description + "\nNo matching synced games in this set period.", footer=footer),)
+    if report["team"]:
+        footer = ("Games, not matches. W-L-D = wins-losses-draws; N = all games; ? = unknown outcomes. "
+                  "Win % includes draws, excludes unknowns. Results pooled across the team. "
+                  f"Catalog updated {report['catalog_updated']:%Y-%m-%d}. Small samples are descriptive.")
+        return team_pages(report, description, footer)
     pages = []
     for offset in range(0, len(rows), 6):
         fields = []
@@ -32,8 +113,6 @@ def matchup_views(report):
                 value += f" · {row['unknown']} unknown"
             value += f"\n{safe(row['queue'], 180)}"
             title = f"{row['ours']} vs {row['theirs']}"
-            if report["team"]:
-                title = f"{safe(row['player'], 60)} · {title}"
             fields.append(EmbedField(title, value))
         pages.append(EmbedSpec(safe(report["title"], 200), description, tuple(fields), footer))
     return tuple(pages)

@@ -553,7 +553,7 @@ def create_bot(resources: ApplicationResources):
         await execute(interaction, application.matchup_report, int(interaction.user.id),
                       player=player, opponent=opponent_colors, ephemeral=True)
 
-    @bot.tree.command(name="team-matchups", description="The team's current-set matchup records, separated by player and colors.")
+    @bot.tree.command(name="team-matchups", description="The team's combined current-set results by played deck and opponent colors.")
     @app_commands.choices(opponent_colors=[app_commands.Choice(name=p, value=p) for p in COLOR_PAIRS])
     @app_commands.describe(opponent_colors="Optional: show only this opposing color combination")
     async def team_matchups(interaction: discord.Interaction, opponent_colors: str | None = None) -> None:
