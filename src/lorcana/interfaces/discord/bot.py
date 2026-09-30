@@ -16,6 +16,7 @@ from lorcana.coach.request_service import CoachRequestService
 from lorcana.coach.service import CoachService
 from lorcana.duels.query_service import DuelsQueryService
 from lorcana.duels.matchups import COLOR_PAIRS, MatchupService
+from lorcana.duels.summary import DuelsSummaryService
 from lorcana.identity.query_service import IdentityQueryService
 from lorcana.jobs.service import JobQueue
 from lorcana.notifications.live_events import LiveEventAlertService
@@ -157,6 +158,7 @@ def create_bot(resources: ApplicationResources):
         coach_requests=coach_requests,
         coach=coach_service,
         matchups=MatchupService.from_engine(resources.engine, team_slug=resources.settings.discord_team_slug),
+        duels_summary=DuelsSummaryService.from_engine(resources.engine, team_slug=resources.settings.discord_team_slug),
         usage=usage,
         jobs=JobQueue.from_engine(resources.engine),
     )
@@ -552,6 +554,11 @@ def create_bot(resources: ApplicationResources):
                               opponent_colors: str | None = None) -> None:
         await execute(interaction, application.matchup_report, int(interaction.user.id),
                       player=player, opponent=opponent_colors, ephemeral=True)
+
+    @bot.tree.command(name="duels-summary", description="Each team member's most-played colors and average mulligan size this set.")
+    @app_commands.guild_only()
+    async def duels_summary(interaction: discord.Interaction) -> None:
+        await execute(interaction, application.duels_summary_report, int(interaction.user.id), ephemeral=False)
 
     @bot.tree.command(name="team-matchups", description="The team's combined current-set results by played deck and opponent colors.")
     @app_commands.choices(opponent_colors=[app_commands.Choice(name=p, value=p) for p in COLOR_PAIRS])

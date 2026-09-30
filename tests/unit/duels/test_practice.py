@@ -212,6 +212,7 @@ def test_gateway_registers_practice_with_analyzer_disabled():
     bot = create_bot(resources)
     try:
         assert bot.tree.get_command("practice") is None
+        assert bot.tree.get_command("duels-summary") is not None
         assert [p.name for p in bot.tree.get_command("player-matchups").parameters] == ["player", "opponent_colors"]
         assert [p.name for p in bot.tree.get_command("team-matchups").parameters] == ["opponent_colors"]
     finally:

@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from lorcana.duels.matchups import MatchupService
+from lorcana.duels.summary import DuelsSummaryService
+from lorcana.interfaces.discord.duels_summary_views import summary_views as duels_summary_views
 from lorcana.interfaces.discord.matchup_views import matchup_views
 from lorcana.duels.practice_service import PracticeService
 from lorcana.interfaces.discord.practice_views import summary_views, opening_views
@@ -65,6 +67,7 @@ class DiscordApplication:
         jobs: JobQueue | None = None,
         practice: PracticeService | None = None,
         matchups: MatchupService | None = None,
+        duels_summary: DuelsSummaryService | None = None,
     ) -> None:
         if not default_team_slug.strip():
             raise ValueError("default_team_slug must not be empty")
@@ -78,6 +81,7 @@ class DiscordApplication:
         self.jobs = jobs
         self.practice = practice
         self.matchups = matchups
+        self.duels_summary = duels_summary
         self.default_team_slug = default_team_slug.strip().lower()
 
     def player(self, query: str) -> DiscordResponse:
@@ -199,6 +203,15 @@ class DiscordApplication:
                 content=f"No Houston Set Championships were found for **{set_name}**."
             )
         return DiscordResponse(embeds=set_championship_views(set_name, events))
+
+    def duels_summary_report(self, discord_user_id: int) -> DiscordResponse:
+        if self.duels_summary is None:
+            return DiscordResponse(content="Duels summaries are not configured.", ephemeral=True)
+        try:
+            report = self.duels_summary.report(discord_user_id)
+        except ValueError as error:
+            return DiscordResponse(content=str(error), ephemeral=True)
+        return DiscordResponse(embeds=duels_summary_views(report))
 
     def matchup_players(self, discord_user_id: int):
         if self.matchups is None:

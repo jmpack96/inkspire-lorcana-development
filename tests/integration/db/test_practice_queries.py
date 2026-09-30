@@ -29,7 +29,7 @@ def test_practice_is_private_deduplicated_and_keeps_history_only_games(db_engine
         c.execute(duels_game_observations.insert(), [dict(connection_id=a, game_id=g, result="win", provider_payload={}, first_seen_at=now, last_seen_at=now) for a, g in ((account, game), (duplicate, missing), (account, missing), (foreign, secret))])
         from datetime import timedelta
         c.execute(duels_replays.insert(), [dict(replay_id=r, connection_id=a, game_id=g, fetched_at=now - timedelta(days=age), source_sha256=str(r), content_encoding="identity", compressed_bytes=b"{}", compressed_size=2, status="valid") for r, a, g, age in ((replay_id, account, game, 0), (older_replay, account, game, 1), (foreign_replay, foreign, secret, 0))])
-        c.execute(duels_normalizations.insert(), [dict(normalization_id=n, replay_id=r, parser_version=PARSER_VERSION, schema_version=1, normalized={"decklist": [card] * 60}, normalized_sha256=str(n), warnings=[], status="valid", created_at=now) for n, r, card in ((norm, replay_id, "1-1"), (old_norm, older_replay, "2-2"), (foreign_norm, foreign_replay, "3-3"))])
+        c.execute(duels_normalizations.insert(), [dict(normalization_id=n, replay_id=r, parser_version=PARSER_VERSION, schema_version=1, normalized={"decklist": [card] * 60, "mulligan": {"count": 1 if card == "1-1" else 2}}, normalized_sha256=str(n), warnings=[], status="valid", created_at=now) for n, r, card in ((norm, replay_id, "1-1"), (old_norm, older_replay, "2-2"), (foreign_norm, foreign_replay, "3-3"))])
     try:
         report = PracticeService.from_engine(db_engine).report(owner)
         assert {r["game_id"] for r in report["rows"]} == {game, missing}
@@ -47,6 +47,15 @@ def test_practice_is_private_deduplicated_and_keeps_history_only_games(db_engine
             grouped = MatchupRepository().results(c, member_ids=[owner], since=now - timedelta(days=1), until=now)
             assert sum(r["games"] for r in grouped) == 2  # duplicate accounts do not double count
             assert all(r["team_observers"] == 1 for r in grouped)
+        from lorcana.duels.summary import DuelsSummaryRepository
+        with db_engine.connect() as c:
+            summary = list(DuelsSummaryRepository().history(
+                c, member_ids=[owner], since=now - timedelta(days=1), until=now))
+            assert len(summary) == 2  # duplicate accounts and foreign member excluded
+            selected = next(r for r in summary if r["game_id"] == game)
+            assert selected["evidence"]["mulligan"]["count"] == 1  # latest own replay
+            assert "decklist" not in selected["evidence"] and "effective_actions" not in selected["evidence"]
+            assert next(r for r in summary if r["game_id"] == missing)["evidence"] is None
         with db_engine.begin() as c:
             c.execute(duels_game_observations.insert().values(connection_id=foreign, game_id=game,
                 result="loss", provider_payload={}, first_seen_at=now, last_seen_at=now))
