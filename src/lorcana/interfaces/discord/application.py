@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from uuid import uuid4
 
+from lorcana.duels.practice_service import PracticeService
+from lorcana.interfaces.discord.practice_views import summary_views, opening_views
 from lorcana.analytics.service import DiscordUsageService
 from lorcana.interfaces.discord.views import (
     EmbedSpec,
@@ -59,6 +61,7 @@ class DiscordApplication:
         coach: CoachService | None = None,
         usage: DiscordUsageService | None = None,
         jobs: JobQueue | None = None,
+        practice: PracticeService | None = None,
     ) -> None:
         if not default_team_slug.strip():
             raise ValueError("default_team_slug must not be empty")
@@ -70,6 +73,7 @@ class DiscordApplication:
         self.coach = coach
         self.usage = usage
         self.jobs = jobs
+        self.practice = practice
         self.default_team_slug = default_team_slug.strip().lower()
 
     def player(self, query: str) -> DiscordResponse:
@@ -191,6 +195,22 @@ class DiscordApplication:
                 content=f"No Houston Set Championships were found for **{set_name}**."
             )
         return DiscordResponse(embeds=set_championship_views(set_name, events))
+
+    def practice_report(self, discord_user_id: int, *, openings: bool = False,
+                        days: int = 30, ranked: bool | None = None, deck: str | None = None,
+                        profile: str = "general", cards: str | None = None) -> DiscordResponse:
+        if self.identity is None or self.practice is None:
+            return DiscordResponse(content="Practice reports are not configured.", ephemeral=True)
+        member = self.identity.member_for_discord_user(discord_user_id)
+        if member is None:
+            return DiscordResponse(content="Your Discord account is not linked to a Lorcana member profile yet.", ephemeral=True)
+        try:
+            report = self.practice.report(member.member_id, openings=openings, days=days,
+                                          ranked=ranked, deck=deck, profile=profile, cards=cards)
+        except ValueError as error:
+            return DiscordResponse(content=str(error), ephemeral=True)
+        views = opening_views(report) if openings else summary_views(report)
+        return DiscordResponse(embeds=views, ephemeral=True)
 
     def coach_request(self, discord_user_id: int, game_id: str, turn: int | None = None) -> DiscordResponse:
         if self.identity is None or self.coach_requests is None:
