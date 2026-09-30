@@ -136,16 +136,16 @@ def test_team_table_condenses_rows_without_combining_queue_records():
     assert len(pages) == 1
     infinity = pages[0].description
     assert not pages[0].fields
-    assert "Ru/Sa" in infinity and "Em/St" in infinity
+    assert "🔴🔵" in infinity and "🟢⚪" in infinity
     assert "7-2-1" in infinity and "70%" in infinity
     # N counts unknowns too; the separate ? column makes the denominator clear.
-    assert next(line for line in infinity.splitlines() if line.startswith("Ru/Sa")).split() == ["Ru/Sa", "Em/St", "7-2-1", "70%", "11", "1"]
+    assert next(line for line in infinity.splitlines() if line.startswith("🔴🔵")).split() == ["🔴🔵", "🟢⚪", "7-2-1", "70%", "11", "1"]
     assert "player" not in report["rows"][0]
     assert "Jacob" not in infinity
     assert "Player" not in infinity
     assert "Core" in infinity
     assert infinity.count("```") == 4
-    assert "Am Amber" in infinity and "Ay Amethyst" in infinity
+    assert "Amber" not in infinity and "Amethyst" not in infinity
 
 
 def test_team_tables_paginate_fit_discord_and_sanitize_labels():
@@ -193,3 +193,17 @@ def test_team_totals_are_weighted_and_player_reports_stay_individual():
     assert (jacob["rows"][0]["win"], jacob["rows"][0]["loss"]) == (9, 1)
     assert michael["rows"][0]["player"] == "Michael"
     assert michael["rows"][0]["loss"] == 2
+
+
+def test_ink_emojis_and_table_visual_width():
+    from lorcana.interfaces.discord.matchup_views import short_colors, display_width, team_table
+    assert [short_colors(color) for color in ("Amber", "Amethyst", "Emerald", "Ruby", "Sapphire", "Steel", "Unknown")] == ["🟡", "🟣", "🟢", "🔴", "🔵", "⚪", "❓"]
+    assert short_colors("Ruby/Sapphire") == "🔴🔵"
+    assert short_colors("Unknown") == "❓"
+    assert short_colors("invalid") == "❓"
+    table = team_table([
+        dict(ours="Ruby/Sapphire", theirs="Emerald/Steel", win=7, loss=2, draw=1, unknown=0),
+        dict(ours="Unknown", theirs="Amber/Steel", win=0, loss=0, draw=0, unknown=1),
+    ])
+    lines = table.splitlines()[1:-1]
+    assert len({display_width(line) for line in lines}) == 1

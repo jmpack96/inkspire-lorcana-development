@@ -21,8 +21,9 @@ compact monospace tables grouped by queue, with up to twelve rows per page.
 Team records pool all active members by played deck and opponent colors within
 each queue. Columns are Deck, Vs, W-L-D, Win%, and N (all games, including unknown
 outcomes). A separate `?` count appears when a table contains unknown outcomes.
-Ink abbreviations are explained below each page. Use `/player-matchups` for
-individual player results.
+Played and opposing colors use paired circle emojis (for example, 🔴🔵 for
+Ruby/Sapphire). Unknown colors use ❓. No color legend is included.
+Use `/player-matchups` for individual player results.
 Exact queue records stay separate, even when their displayed labels match.
 Most-played matchups appear first within each queue; queues follow their first
 appearance in the most-played results. Player reports retain six rows per page.

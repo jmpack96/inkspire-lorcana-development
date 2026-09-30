@@ -1,5 +1,6 @@
 """One compact matchup page at a time; no technical inputs or replay details."""
 from collections import defaultdict
+from unicodedata import east_asian_width
 
 from lorcana.interfaces.discord.views import EmbedField, EmbedSpec
 
@@ -8,13 +9,17 @@ def safe(value, length=100):
     return " ".join(str(value).replace("@", "＠").replace("`", "'").split())[:length]
 
 
-INK_CODES = {"Amber": "Am", "Amethyst": "Ay", "Emerald": "Em",
-             "Ruby": "Ru", "Sapphire": "Sa", "Steel": "St", "Unknown": "?"}
-INK_LEGEND = "Am Amber · Ay Amethyst · Em Emerald · Ru Ruby · Sa Sapphire · St Steel · ? Unknown"
+INK_EMOJIS = {"Amber": "🟡", "Amethyst": "🟣", "Emerald": "🟢",
+              "Ruby": "🔴", "Sapphire": "🔵", "Steel": "⚪", "Unknown": "❓"}
 
 
 def short_colors(value):
-    return "/".join(INK_CODES.get(color, "?") for color in str(value).split("/"))
+    return "".join(INK_EMOJIS.get(color, "❓") for color in str(value).split("/"))
+
+
+def display_width(value):
+    # Emoji glyphs occupy two monospace columns, despite being one code point.
+    return sum(2 if east_asian_width(char) in {"W", "F"} else 1 for char in value)
 
 
 def team_table(rows):
@@ -33,10 +38,11 @@ def team_table(rows):
         if unknown:
             values.append(str(row["unknown"]))
         cells.append(values)
-    widths = [max(len(values[i]) for values in [headers, *cells]) for i in range(len(headers))]
+    widths = [max(display_width(values[i]) for values in [headers, *cells]) for i in range(len(headers))]
 
     def line(values):
-        return " ".join(value.ljust(widths[i]) if i < 2 else value.rjust(widths[i])
+        return " ".join(value + " " * (widths[i] - display_width(value)) if i < 2
+                        else " " * (widths[i] - display_width(value)) + value
                         for i, value in enumerate(values)).rstrip()
 
     return "```\n" + "\n".join(line(values) for values in [headers, *cells]) + "\n```"
@@ -50,11 +56,10 @@ def team_pages(report, description, footer):
     pages = []
     sections = []
     page_rows = 0
-    suffix = "\n" + INK_LEGEND
 
     def page():
         return EmbedSpec(safe(report["title"], 200),
-                         description + "\n" + "\n".join(sections) + suffix, footer=footer)
+                         description + "\n" + "\n".join(sections), footer=footer)
 
     for queue, rows in queues.items():
         heading = f"**{safe(queue, 180)}**\n"
@@ -62,11 +67,11 @@ def team_pages(report, description, footer):
         while offset < len(rows):
             count = min(12 - page_rows, len(rows) - offset)
             section = heading + team_table(rows[offset:offset + count])
-            candidate = description + "\n" + "\n".join([*sections, section]) + suffix
+            candidate = description + "\n" + "\n".join([*sections, section])
             while count > 1 and len(candidate) > 4096:
                 count -= 1
                 section = heading + team_table(rows[offset:offset + count])
-                candidate = description + "\n" + "\n".join([*sections, section]) + suffix
+                candidate = description + "\n" + "\n".join([*sections, section])
             if sections and len(candidate) > 4096:
                 pages.append(page())
                 sections, page_rows = [], 0
