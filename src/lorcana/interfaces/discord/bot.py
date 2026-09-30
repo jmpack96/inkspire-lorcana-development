@@ -15,7 +15,7 @@ from lorcana.catalog.service import CatalogService
 from lorcana.coach.request_service import CoachRequestService
 from lorcana.coach.service import CoachService
 from lorcana.duels.query_service import DuelsQueryService
-from lorcana.duels.practice_service import PracticeService
+from lorcana.duels.matchups import COLOR_PAIRS, MatchupService
 from lorcana.identity.query_service import IdentityQueryService
 from lorcana.jobs.service import JobQueue
 from lorcana.notifications.live_events import LiveEventAlertService
@@ -156,7 +156,7 @@ def create_bot(resources: ApplicationResources):
         identity=identity,
         coach_requests=coach_requests,
         coach=coach_service,
-        practice=PracticeService.from_engine(resources.engine),
+        matchups=MatchupService.from_engine(resources.engine, team_slug=resources.settings.discord_team_slug),
         usage=usage,
         jobs=JobQueue.from_engine(resources.engine),
     )
@@ -538,28 +538,27 @@ def create_bot(resources: ApplicationResources):
         await execute(interaction, application.set_championships, set_name)
 
 
-    practice_group = app_commands.Group(name="practice", description="Private Duels practice reports without AI.")
+    async def matchup_player_choices(interaction: discord.Interaction, current: str):
+        roster = await asyncio.to_thread(application.matchup_players, int(interaction.user.id))
+        return [app_commands.Choice(name=row["preferred_display_name"][:100], value=str(row["member_id"]))
+                for row in roster if current.casefold() in row["preferred_display_name"].casefold()][:25]
 
-    @practice_group.command(name="summary", description="Your Duels results, matchups, queues and exact deck versions.")
-    @app_commands.describe(days="Look back 1–365 days", ranked="Omit for all queues", deck="Deck ID from a summary")
-    async def practice_summary(interaction: discord.Interaction, days: app_commands.Range[int, 1, 365] = 30,
-                               ranked: bool | None = None, deck: str | None = None) -> None:
-        await execute(interaction, application.practice_report, int(interaction.user.id),
-                      days=days, ranked=ranked, deck=deck, ephemeral=True, command_name="practice summary")
+    @bot.tree.command(name="player-matchups", description="A player's current-set results by their colors and opponent colors.")
+    @app_commands.autocomplete(player=matchup_player_choices)
+    @app_commands.choices(opponent_colors=[app_commands.Choice(name=p, value=p) for p in COLOR_PAIRS])
+    @app_commands.describe(player="Choose a team member; leave blank for yourself",
+                           opponent_colors="Optional: show only this opposing color combination")
+    async def player_matchups(interaction: discord.Interaction, player: str | None = None,
+                              opponent_colors: str | None = None) -> None:
+        await execute(interaction, application.matchup_report, int(interaction.user.id),
+                      player=player, opponent=opponent_colors, ephemeral=True)
 
-    @practice_group.command(name="openings", description="Your mulligans, early ink development and optional card targets.")
-    @app_commands.choices(profile=[app_commands.Choice(name="Any deck", value="general"),
-                                  app_commands.Choice(name="Ruby/Sapphire: Tipo and Sail", value="ruby_sapphire")])
-    @app_commands.describe(days="Look back 1–365 days", ranked="Omit for all queues", deck="Deck ID from a summary",
-                           cards="Optional comma-separated full card names or Duels card IDs (overrides profile targets)")
-    async def practice_openings(interaction: discord.Interaction, days: app_commands.Range[int, 1, 365] = 30,
-                                ranked: bool | None = None, deck: str | None = None,
-                                profile: str = "general", cards: str | None = None) -> None:
-        await execute(interaction, application.practice_report, int(interaction.user.id),
-                      openings=True, days=days, ranked=ranked, deck=deck, profile=profile, cards=cards,
-                      ephemeral=True, command_name="practice openings")
-
-    bot.tree.add_command(practice_group)
+    @bot.tree.command(name="team-matchups", description="The team's current-set matchup records, separated by player and colors.")
+    @app_commands.choices(opponent_colors=[app_commands.Choice(name=p, value=p) for p in COLOR_PAIRS])
+    @app_commands.describe(opponent_colors="Optional: show only this opposing color combination")
+    async def team_matchups(interaction: discord.Interaction, opponent_colors: str | None = None) -> None:
+        await execute(interaction, application.matchup_report, int(interaction.user.id),
+                      team=True, opponent=opponent_colors, ephemeral=False)
 
     @bot.tree.command(name="coach", description="Queue a private Coach analysis for one of your Duels games.")
     @app_commands.describe(game_id="Duels game ID")

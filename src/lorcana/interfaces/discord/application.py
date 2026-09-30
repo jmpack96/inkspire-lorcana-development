@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from uuid import uuid4
 
+from lorcana.duels.matchups import MatchupService
+from lorcana.interfaces.discord.matchup_views import matchup_views
 from lorcana.duels.practice_service import PracticeService
 from lorcana.interfaces.discord.practice_views import summary_views, opening_views
 from lorcana.analytics.service import DiscordUsageService
@@ -62,6 +64,7 @@ class DiscordApplication:
         usage: DiscordUsageService | None = None,
         jobs: JobQueue | None = None,
         practice: PracticeService | None = None,
+        matchups: MatchupService | None = None,
     ) -> None:
         if not default_team_slug.strip():
             raise ValueError("default_team_slug must not be empty")
@@ -74,6 +77,7 @@ class DiscordApplication:
         self.usage = usage
         self.jobs = jobs
         self.practice = practice
+        self.matchups = matchups
         self.default_team_slug = default_team_slug.strip().lower()
 
     def player(self, query: str) -> DiscordResponse:
@@ -195,6 +199,24 @@ class DiscordApplication:
                 content=f"No Houston Set Championships were found for **{set_name}**."
             )
         return DiscordResponse(embeds=set_championship_views(set_name, events))
+
+    def matchup_players(self, discord_user_id: int):
+        if self.matchups is None:
+            return []
+        try:
+            return self.matchups.choices(discord_user_id)
+        except ValueError:
+            return []
+
+    def matchup_report(self, discord_user_id: int, *, team: bool = False,
+                       player: str | None = None, opponent: str | None = None) -> DiscordResponse:
+        if self.matchups is None:
+            return DiscordResponse(content="Matchup reports are not configured.", ephemeral=True)
+        try:
+            report = self.matchups.report(discord_user_id, team=team, player=player, opponent=opponent)
+        except ValueError as error:
+            return DiscordResponse(content=str(error), ephemeral=True)
+        return DiscordResponse(embeds=matchup_views(report), ephemeral=not team)
 
     def practice_report(self, discord_user_id: int, *, openings: bool = False,
                         days: int = 30, ranked: bool | None = None, deck: str | None = None,

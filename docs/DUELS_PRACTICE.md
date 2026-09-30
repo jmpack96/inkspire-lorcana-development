@@ -1,5 +1,8 @@
 # Private Duels practice reports (no AI)
 
+> Superseded Discord interface: see `DUELS_MATCHUPS.md` for the current
+> `/player-matchups` and `/team-matchups` commands. Legacy internals remain for reuse.
+
 `/practice summary` and `/practice openings` read existing synced Duels data.
 They make no Duels API or model calls and do not enqueue Coach analysis. The
 practice service is wired independently of `LORCANA_COACH_ANALYZER`. Leave that

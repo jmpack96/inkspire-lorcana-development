@@ -211,9 +211,9 @@ def test_gateway_registers_practice_with_analyzer_disabled():
     resources = ApplicationResources(Settings(), create_engine("postgresql+psycopg://unused:unused@localhost/unused"))
     bot = create_bot(resources)
     try:
-        group = bot.tree.get_command("practice")
-        assert {c.name for c in group.commands} == {"summary", "openings"}
-        assert [p.name for p in group.get_command("openings").parameters] == ["days", "ranked", "deck", "profile", "cards"]
+        assert bot.tree.get_command("practice") is None
+        assert [p.name for p in bot.tree.get_command("player-matchups").parameters] == ["player", "opponent_colors"]
+        assert [p.name for p in bot.tree.get_command("team-matchups").parameters] == ["opponent_colors"]
     finally:
         asyncio.run(bot.close())
 

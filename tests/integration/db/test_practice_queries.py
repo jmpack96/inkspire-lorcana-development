@@ -41,6 +41,20 @@ def test_practice_is_private_deduplicated_and_keeps_history_only_games(db_engine
             payloads = PracticeRepository().opening_evidence(c, member_id=owner, normalization_ids=[norm, foreign_norm])
             assert set(payloads) == {norm}
         assert PracticeService.from_engine(db_engine).report(uuid4())["rows"] == []
+        from datetime import timedelta
+        from lorcana.duels.matchups import MatchupRepository
+        with db_engine.connect() as c:
+            grouped = MatchupRepository().results(c, member_ids=[owner], since=now - timedelta(days=1), until=now)
+            assert sum(r["games"] for r in grouped) == 2  # duplicate accounts do not double count
+            assert all(r["team_observers"] == 1 for r in grouped)
+        with db_engine.begin() as c:
+            c.execute(duels_game_observations.insert().values(connection_id=foreign, game_id=game,
+                result="loss", provider_payload={}, first_seen_at=now, last_seen_at=now))
+        with db_engine.connect() as c:
+            grouped = MatchupRepository().results(c, member_ids=[owner, other], since=now - timedelta(days=1), until=now)
+            assert sum(r["games"] for r in grouped if r["team_observers"] == 2) == 2
+            assert sum(r["games"] for r in grouped if r["team_observers"] == 1) == 2
+
     finally:
         with db_engine.begin() as c:
             c.execute(text("TRUNCATE TABLE duels_connections, members CASCADE"))
