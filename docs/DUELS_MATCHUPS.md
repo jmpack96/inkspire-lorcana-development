@@ -17,7 +17,7 @@ enter a name without choosing the matching autocomplete result.
 
 Each row shows played deck colors against opponent colors, W/L/D,
 win percentage, game count, and queue/format/ranked status. Team reports use
-compact monospace tables grouped by queue, with up to twelve rows per page.
+compact monospace tables grouped by queue, with up to twenty rows per page.
 Team records pool all active members by played deck and opponent colors within
 each queue. Columns are Deck, Vs, W-L-D, Win%, and N (all games, including unknown
 outcomes). A separate `?` count appears when a table contains unknown outcomes.
@@ -26,7 +26,7 @@ Ruby/Sapphire). Unknown colors use ❓. No color legend is included.
 Use `/player-matchups` for individual player results.
 Exact queue records stay separate, even when their displayed labels match.
 Most-played matchups appear first within each queue; queues follow their first
-appearance in the most-played results. Player reports retain six rows per page.
+appearance in the most-played results. Player reports show up to twelve rows per page.
 Use Next/Previous in the same message. Player reports are private; team reports
 are public in the invoking channel. Unknown outcomes are shown separately and excluded from win
 percentage. Draws are included in the win-percentage denominator.
@@ -89,3 +89,9 @@ git apply /path/to/duels-current-set-matchups.patch
 Deploy/restart the bot normally. Its startup command sync removes `/practice`
 and registers `/player-matchups` and `/team-matchups`. Legacy practice code stays
 in the repository but is no longer exposed through slash commands.
+
+Duels reports and player autocomplete include only active team members with a
+configured, non-inactive Duels connection (a nonempty `env:` credential reference).
+Token validity is not checked in the bot. Linked active teammates without Duels
+connections can still view team reports. The full roster is retained internally
+when recognizing team-versus-team games.

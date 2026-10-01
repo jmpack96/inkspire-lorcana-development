@@ -89,6 +89,8 @@ class DuelsSummaryService:
             names = {r["member_id"]: r["preferred_display_name"] for r in roster}
             if self.repository.viewer(connection, viewer_id) not in names:
                 raise ValueError("Link your Discord account to an active member of this team to view Duels summaries.")
+            roster = self.repository.roster(connection, self.team_slug, duels_only=True)
+            names = {r["member_id"]: r["preferred_display_name"] for r in roster}
             catalog = self.repository.catalog(connection)
             period = current_set(catalog["metadata_json"] if catalog else {}, now)
             coverage = self.repository.coverage(connection, list(names))

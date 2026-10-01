@@ -1,5 +1,5 @@
 """Compact team summaries; no hands, replay details, or color legend."""
-from lorcana.interfaces.discord.matchup_views import display_width, safe, short_colors
+from lorcana.interfaces.discord.matchup_views import TEAM_ROWS_PER_PAGE, display_width, safe, short_colors
 from lorcana.interfaces.discord.views import EmbedSpec
 
 
@@ -13,11 +13,8 @@ def summary_views(report):
               "missing or invalid evidence excluded. Colors are not exact deck builds. "
               f"Catalog updated {report['catalog_updated']:%Y-%m-%d}.")
     if not report["rows"]:
-        return (EmbedSpec("Team Duels summary", intro + "\nNo active team members.", footer=footer),)
-    pages = []
-    # Six players per page leaves room for tied color combinations and full names.
-    for offset in range(0, len(report["rows"]), 6):
-        rows = report["rows"][offset:offset + 6]
+        return (EmbedSpec("Team Duels summary", intro + "\nNo team members have a configured Duels connection.", footer=footer),)
+    def page(rows):
         cells = [["Player", "Main", "Played", "Avg mull", "Sample"]]
         ties = []
         for row in rows:
@@ -39,5 +36,17 @@ def summary_views(report):
         description = intro + "\n" + table
         if ties:
             description += "\n" + "\n".join(ties)
-        pages.append(EmbedSpec("Team Duels summary", description, footer=footer))
+        return EmbedSpec("Team Duels summary", description, footer=footer)
+
+    pages, pending = [], []
+    for row in report["rows"]:
+        candidate = page([*pending, row])
+        size = len(candidate.title) + len(candidate.description) + len(candidate.footer)
+        if pending and (len(pending) >= TEAM_ROWS_PER_PAGE or
+                        len(candidate.description) > 4096 or size > 5800):
+            pages.append(page(pending))
+            pending = []
+        pending.append(row)
+    if pending:
+        pages.append(page(pending))
     return tuple(pages)

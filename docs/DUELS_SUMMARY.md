@@ -5,7 +5,7 @@ in the invoking server channel. The caller must be a linked active team member.
 Errors remain private. No AI key, migration, or replay re-import is required.
 Bot startup registers the command automatically after deployment.
 
-One row per active member shows:
+One row per active member with a configured, non-inactive Duels connection shows:
 
 - **Main**: their most-played known deck colors, using the team's circle emojis.
   Ties are labeled and every tied combination is listed below the table.
@@ -29,7 +29,8 @@ exact account/game perspective supplies evidence. The query streams compact
 opening data in batches with no arbitrary sample cap; full actions are not
 loaded. Only aggregates are displayed, not private hands or replay details.
 
-The command shows six members per page with existing Previous/Next buttons.
+The command shows up to twenty members per page with existing Previous/Next
+buttons, splitting earlier if Discord limits require it.
 Color combinations represent colors, not exact deck builds. Sync coverage means
 members who have ever completed sync, not a guarantee of complete current-set
 history. Future modules can add play/draw splits, deck-specific mulligan averages,
@@ -37,3 +38,9 @@ and recent activity without changing the slash-command name.
 
 Apply `duels-team-summary.patch` after the combined team-table and emoji patches,
 then deploy/restart the bot normally.
+
+A configured connection has a nonempty `env:` credential reference in PostgreSQL.
+The bot does not inspect worker secrets or verify token validity. Connections with
+authentication errors remain visible for troubleshooting; inactive connections
+are hidden. Active linked teammates without Duels connections may still view
+team reports.

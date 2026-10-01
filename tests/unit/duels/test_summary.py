@@ -56,13 +56,15 @@ def reader():
 class Repository:
     def __init__(self):
         self.a, self.b = uuid4(), uuid4()
+        self.duels_members = {self.a, self.b}
         self.viewer_id = self.a
         self.rows = []
         self.calls = []
 
-    def roster(self, c, slug):
-        return [{"member_id": self.a, "preferred_display_name": "Jacob"},
+    def roster(self, c, slug, *, duels_only=False):
+        roster = [{"member_id": self.a, "preferred_display_name": "Jacob"},
                 {"member_id": self.b, "preferred_display_name": "Ben"}]
+        return [r for r in roster if not duels_only or r["member_id"] in self.duels_members]
 
     def viewer(self, c, uid):
         return self.viewer_id
@@ -134,9 +136,43 @@ def test_application_public_success_private_error_and_pages_fit():
     report["rows"] = [dict(deepcopy(source), player="@everyone ```\n" + "x" * 100,
                           top_colors=["Ruby/Sapphire", "Emerald/Steel"]) for _ in range(15)]
     pages = summary_views(report)
-    assert len(pages) == 3
+    assert len(pages) == 1
     for page in pages:
         assert "@everyone" not in page.description
         assert page.description.count("```") == 2
+        assert len(page.description) <= 4096
+        assert len(page.title) + len(page.description) + len(page.footer) < 6000
+
+
+def test_summary_filters_members_and_allows_unconfigured_teammate_to_view():
+    r = Repository()
+    r.duels_members = {r.a}
+    r.viewer_id = r.b
+    r.rows = [r.row(["ruby", "sapphire"], evidence()),
+              r.row(["amber", "steel"], evidence(), member=r.b)]
+    report = service(r).report(123)
+    assert [row["player"] for row in report["rows"]] == ["Jacob"]
+    assert report["members"] == report["synced"] == 1
+    assert r.calls[-1]["member_ids"] == [r.a]
+    r.duels_members = set()
+    report = service(r).report(123)
+    assert report["rows"] == [] and report["members"] == 0
+    assert "configured Duels connection" in summary_views(report)[0].description
+
+
+def test_summary_twenty_rows_per_page_and_early_split_for_long_ties():
+    from lorcana.duels.matchups import COLOR_PAIRS, COLORS
+    report = service(Repository()).report(123)
+    row = report["rows"][0]
+    report["rows"] = [dict(row, player=f"Player {i}", top_colors=["Ruby/Sapphire"]) for i in range(45)]
+    pages = summary_views(report)
+    assert len(pages) == 3
+    assert len(pages[0].description.split("```\n")[1].split("\n```", 1)[0].splitlines()) == 21
+    for row in report["rows"]:
+        row.update(player="LongName" * 20, top_colors=list(COLOR_PAIRS) + list(COLORS),
+                   games=10**12, known_colors=10**12, top_count=10**12, sample=10**12)
+    pages = summary_views(report)
+    assert len(pages) > 3
+    for page in pages:
         assert len(page.description) <= 4096
         assert len(page.title) + len(page.description) + len(page.footer) < 6000

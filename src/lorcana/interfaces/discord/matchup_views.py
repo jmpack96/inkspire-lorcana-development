@@ -11,6 +11,8 @@ def safe(value, length=100):
 
 INK_EMOJIS = {"Amber": "🟡", "Amethyst": "🟣", "Emerald": "🟢",
               "Ruby": "🔴", "Sapphire": "🔵", "Steel": "⚪", "Unknown": "❓"}
+TEAM_ROWS_PER_PAGE = 20
+PLAYER_ROWS_PER_PAGE = 12
 
 
 def short_colors(value):
@@ -65,7 +67,7 @@ def team_pages(report, description, footer):
         heading = f"**{safe(queue, 180)}**\n"
         offset = 0
         while offset < len(rows):
-            count = min(12 - page_rows, len(rows) - offset)
+            count = min(TEAM_ROWS_PER_PAGE - page_rows, len(rows) - offset)
             section = heading + team_table(rows[offset:offset + count])
             candidate = description + "\n" + "\n".join([*sections, section])
             while count > 1 and len(candidate) > 4096:
@@ -79,7 +81,7 @@ def team_pages(report, description, footer):
             sections.append(section)
             page_rows += count
             offset += count
-            if page_rows == 12:
+            if page_rows == TEAM_ROWS_PER_PAGE:
                 pages.append(page())
                 sections, page_rows = [], 0
     if sections:
@@ -108,9 +110,9 @@ def matchup_views(report):
                   f"Catalog updated {report['catalog_updated']:%Y-%m-%d}. Small samples are descriptive.")
         return team_pages(report, description, footer)
     pages = []
-    for offset in range(0, len(rows), 6):
+    for offset in range(0, len(rows), PLAYER_ROWS_PER_PAGE):
         fields = []
-        for row in rows[offset:offset + 6]:
+        for row in rows[offset:offset + PLAYER_ROWS_PER_PAGE]:
             n = row["win"] + row["loss"] + row["draw"]
             rate = f"{100 * row['win'] / n:.0f}% wins" if n else "win rate unavailable"
             value = f"**{row['win']}W–{row['loss']}L–{row['draw']}D · {rate} · {n} decided games**"

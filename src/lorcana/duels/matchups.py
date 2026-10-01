@@ -56,13 +56,24 @@ def queue_label(row):
 
 
 class MatchupRepository:
-    def roster(self, connection, slug):
-        return [dict(r) for r in connection.execute(select(
+    def roster(self, connection, slug, *, duels_only=False):
+        query = select(
             members.c.member_id, members.c.preferred_display_name,
         ).select_from(members.join(team_memberships).join(teams)).where(
             teams.c.slug == slug, teams.c.status == "active", members.c.status == "active",
             team_memberships.c.ended_at.is_(None),
-        ).order_by(members.c.preferred_display_name, members.c.member_id)).mappings()]
+        ).order_by(members.c.preferred_display_name, members.c.member_id)
+        if duels_only:
+            # Worker-owned secrets are not available to the bot. A configured
+            # connection is the durable indication that this member uses Duels.
+            # EXISTS avoids duplicating members with multiple connections.
+            query = query.where(select(accounts.c.connection_id).where(
+                accounts.c.member_id == members.c.member_id,
+                accounts.c.status.in_(("active", "auth_error")),
+                func.btrim(accounts.c.credential_ref).like("env:%"),
+                func.length(func.btrim(func.substr(func.btrim(accounts.c.credential_ref), 5))) > 0,
+            ).exists())
+        return [dict(r) for r in connection.execute(query).mappings()]
 
     def viewer(self, connection, discord_user_id):
         return connection.scalar(select(discord_accounts.c.member_id).where(
@@ -115,7 +126,8 @@ class MatchupService:
 
     def choices(self, viewer_id):
         with self.connection_factory() as connection:
-            roster, _ = self._authorized_roster(connection, viewer_id)
+            self._authorized_roster(connection, viewer_id)
+            roster = self.repository.roster(connection, self.team_slug, duels_only=True)
         return roster
 
     def report(self, viewer_id, *, team=False, player=None, opponent=None):
@@ -124,20 +136,28 @@ class MatchupService:
         now = self.clock()
         with self.connection_factory() as connection:
             roster, viewer = self._authorized_roster(connection, viewer_id)
-            names = {r["member_id"]: r["preferred_display_name"] for r in roster}
+            all_names = {r["member_id"]: r["preferred_display_name"] for r in roster}
+            duels_roster = self.repository.roster(connection, self.team_slug, duels_only=True)
+            names = {r["member_id"]: r["preferred_display_name"] for r in duels_roster}
             try:
                 selected = None if team else UUID(player) if player else viewer
             except (TypeError, ValueError):
                 raise ValueError("Select a player from the team dropdown.") from None
-            if selected is not None and selected not in names:
+            if selected is not None and selected not in all_names:
                 raise ValueError("That player is not an active member of this team.")
+            if selected is not None and selected not in names:
+                raise ValueError("That player has no configured Duels connection. Choose a player from the dropdown.")
             catalog = self.repository.catalog(connection)
             period = current_set(catalog["metadata_json"] if catalog else {}, now)
             coverage = self.repository.coverage(connection, list(names))
-            results = self.repository.results(connection, member_ids=list(names), since=period["start"], until=now)
+            # Retain the full roster for recognizing team-v-team games, even
+            # when one member's connection has since been disabled.
+            results = self.repository.results(connection, member_ids=list(all_names), since=period["start"], until=now)
         grouped = defaultdict(lambda: {"win": 0, "loss": 0, "draw": 0, "unknown": 0})
         internal = 0
         for r in results:
+            if r["member_id"] not in names:
+                continue
             if selected is not None and r["member_id"] != selected:
                 continue
             ours, theirs = color_pair(r["your_deck_colors"]), color_pair(r["opponent_deck_colors"])

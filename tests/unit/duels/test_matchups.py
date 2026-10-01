@@ -31,14 +31,16 @@ def reader():
 class Repository:
     def __init__(self):
         self.a, self.b = uuid4(), uuid4()
+        self.duels_members = {self.a, self.b}
         self.rows = []
         self.viewer_id = self.a
         self.metadata = META
         self.result_calls = []
 
-    def roster(self, c, slug):
-        return [{"member_id": self.a, "preferred_display_name": "Jacob"},
+    def roster(self, c, slug, *, duels_only=False):
+        roster = [{"member_id": self.a, "preferred_display_name": "Jacob"},
                 {"member_id": self.b, "preferred_display_name": "Michael"}]
+        return [r for r in roster if not duels_only or r["member_id"] in self.duels_members]
 
     def viewer(self, c, uid):
         return self.viewer_id
@@ -115,11 +117,11 @@ def test_pages_are_short_and_application_is_private():
     r.rows = [r.result(queue_id=f"core-{i}", queue_name=f"Core {i}") for i in range(14)]
     app = DiscordApplication(ratings=None, playhub=None, teams=None, matchups=service(r))
     response = app.matchup_report(123, team=True)
-    assert not response.ephemeral and len(response.embeds) == 2
+    assert not response.ephemeral and len(response.embeds) == 1
     assert app.matchup_report(123).ephemeral
     assert app.matchup_report(123, player=str(r.b)).ephemeral
     assert app.matchup_report(123, team=True, opponent="invalid").ephemeral
-    assert all(len(p.fields) <= 6 for p in response.embeds)
+    assert all(len(p.fields) <= 12 for p in response.embeds)
     assert "Test current set" in response.embeds[0].description
     assert app.matchup_report(123, player="invalid").ephemeral
     assert len(app.matchup_players(123)) == 2
@@ -156,7 +158,7 @@ def test_team_tables_paginate_fit_discord_and_sanitize_labels():
     report["period"]["name"] = "@everyone\n```\t" + "x" * 100
     report["rows"][0].update(ours="Unknown", win=0, loss=0, draw=0, unknown=16)
     pages = matchup_views(report)
-    assert len(pages) == 2
+    assert len(pages) == 1
     assert sum(len(p.description.split("```\n")[1].split("\n```", 1)[0].splitlines()) - 1
                for p in pages) == 15
     assert "—" in pages[0].description and "?" in pages[0].description
@@ -207,3 +209,65 @@ def test_ink_emojis_and_table_visual_width():
     ])
     lines = table.splitlines()[1:-1]
     assert len({display_width(line) for line in lines}) == 1
+
+
+def test_duels_filter_does_not_revoke_team_access_or_expose_unconfigured_players():
+    r = Repository()
+    r.duels_members = {r.a}
+    r.viewer_id = r.b  # viewer has no Duels connection, but is an active teammate
+    r.rows = [r.result(games=3), r.result(member_id=r.b, games=20),
+              r.result(team_observers=2, games=2)]
+    report = service(r).report(123, team=True)
+    assert report["members"] == 1 and report["missing"] == []
+    assert report["rows"][0]["win"] == 3
+    assert report["internal"] == 2
+    assert set(r.result_calls[-1]["member_ids"]) == {r.a, r.b}
+    assert [x["member_id"] for x in service(r).choices(123)] == [r.a]
+    with pytest.raises(ValueError, match="no configured Duels connection"):
+        service(r).report(123)
+    with pytest.raises(ValueError, match="no configured Duels connection"):
+        service(r).report(123, player=str(r.b))
+
+
+def test_larger_team_and_player_matchup_pages():
+    r = Repository()
+    r.rows = [r.result(queue_id=str(i), queue_name="Infinity") for i in range(41)]
+    team = matchup_views(service(r).report(123, team=True))
+    assert len(team) == 3
+    assert len(team[0].description.split("```\n")[1].split("\n```", 1)[0].splitlines()) == 21
+    player = matchup_views(service(r).report(123))
+    assert [len(p.fields) for p in player] == [12, 12, 12, 5]
+
+
+def test_roster_requires_configured_connections_without_duplicate_members():
+    from sqlalchemy import create_engine
+    from lorcana.db.schema.identity import members, teams, team_memberships
+    from lorcana.db.schema.duels import duels_connections
+    from lorcana.duels.matchups import MatchupRepository
+    engine = create_engine("sqlite://")
+    # This query uses portable SQL except PostgreSQL btrim; SQLite's trim is equivalent here.
+    raw = engine.raw_connection()
+    raw.create_function("btrim", 1, lambda value: value.strip(" ") if value is not None else None)
+    raw.close()
+    tables = [members, teams, team_memberships, duels_connections]
+    members.metadata.create_all(engine, tables=tables)
+    ids = [uuid4() for _ in range(6)]
+    team = uuid4()
+    with engine.begin() as c:
+        c.execute(teams.insert().values(team_id=team, slug="inkspire", name="Inkspire",
+                                       status="active", created_at=NOW, updated_at=NOW))
+        c.execute(members.insert(), [dict(member_id=m, preferred_display_name=str(i), status="active",
+                                         created_at=NOW, updated_at=NOW) for i, m in enumerate(ids)])
+        c.execute(team_memberships.insert(), [dict(team_membership_id=uuid4(), team_id=team,
+            member_id=m, role="member", joined_at=NOW) for m in ids])
+        refs = [(ids[0], "env:TOKEN", "active"), (ids[0], "env:SECOND", "active"),
+                (ids[1], "env:FIX_ME", "auth_error"), (ids[2], "env:DISABLED", "inactive"),
+                (ids[3], "", "active"), (ids[4], "env:   ", "active")]
+        c.execute(duels_connections.insert(), [dict(connection_id=uuid4(), member_id=m,
+            credential_ref=ref, status=status, history_exhausted=False, created_at=NOW, updated_at=NOW)
+            for m, ref, status in refs])
+        repo = MatchupRepository()
+        assert len(repo.roster(c, "inkspire")) == 6
+        rows = repo.roster(c, "inkspire", duels_only=True)
+        assert len(rows) == 2 and {r["member_id"] for r in rows} == set(ids[:2])
+    engine.dispose()
