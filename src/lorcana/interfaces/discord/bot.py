@@ -17,6 +17,8 @@ from lorcana.coach.service import CoachService
 from lorcana.duels.query_service import DuelsQueryService
 from lorcana.duels.matchups import COLOR_PAIRS, MatchupService
 from lorcana.duels.summary import DuelsSummaryService
+from lorcana.duels.weekly import WeeklyDuelsService
+from lorcana.notifications.weekly_duels import WeeklyDuelsDelivery
 from lorcana.identity.query_service import IdentityQueryService
 from lorcana.jobs.service import JobQueue
 from lorcana.notifications.live_events import LiveEventAlertService
@@ -149,6 +151,10 @@ def create_bot(resources: ApplicationResources):
             analyzer_generation=resources.settings.coach_analyzer_generation,
         )
         coach_service = CoachService.from_engine(resources.engine)
+    weekly_duels = WeeklyDuelsService.from_engine(resources.engine, team_slug=resources.settings.discord_team_slug)
+    weekly_channel_id = resources.settings.weekly_duels_channel_id
+    weekly_delivery = (WeeklyDuelsDelivery(resources.engine, weekly_duels, channel_id=weekly_channel_id)
+                       if weekly_channel_id is not None else None)
     application = DiscordApplication(
         ratings=RatingQueryService.from_engine(resources.engine),
         playhub=PlayHubQueryService.from_engine(resources.engine),
@@ -159,6 +165,7 @@ def create_bot(resources: ApplicationResources):
         coach=coach_service,
         matchups=MatchupService.from_engine(resources.engine, team_slug=resources.settings.discord_team_slug),
         duels_summary=DuelsSummaryService.from_engine(resources.engine, team_slug=resources.settings.discord_team_slug),
+        weekly_duels=weekly_duels,
         usage=usage,
         jobs=JobQueue.from_engine(resources.engine),
     )
@@ -168,14 +175,44 @@ def create_bot(resources: ApplicationResources):
             super().__init__(intents=discord.Intents.default())
             self.tree = app_commands.CommandTree(self)
             self.live_event_delivery_task: asyncio.Task | None = None
+            self.weekly_duels_task: asyncio.Task | None = None
 
         async def setup_hook(self) -> None:
             synced = await self.tree.sync()
             logger.info("Synced %d Discord slash commands", len(synced))
+            if weekly_delivery is not None:
+                self.weekly_duels_task = asyncio.create_task(self.deliver_weekly_duels())
             if getattr(resources.settings, "live_event_channel_id", None) is not None:
                 self.live_event_delivery_task = asyncio.create_task(
                     self.deliver_live_event_links()
                 )
+
+        async def deliver_weekly_duels(self) -> None:
+            await self.wait_until_ready()
+            while not self.is_closed():
+                claim = None
+                try:
+                    claim = await asyncio.to_thread(weekly_delivery.claim)
+                    if claim is not None:
+                        channel = await self.fetch_channel(claim["channel_id"])
+                        for index in range(claim["next_page"], len(claim["pages"])):
+                            page = claim["pages"][index]
+                            embed = discord.Embed(title=page["title"], description=page["description"])
+                            embed.set_footer(text=page["footer"] + f" • Page {index + 1}/{len(claim['pages'])}")
+                            await asyncio.wait_for(channel.send(embed=embed,
+                                allowed_mentions=discord.AllowedMentions.none()), timeout=60)
+                            await asyncio.to_thread(weekly_delivery.advance, claim, index + 1)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Failed to deliver weekly Duels summary")
+                finally:
+                    if claim is not None:
+                        try:
+                            await asyncio.to_thread(weekly_delivery.release, claim)
+                        except Exception:
+                            logger.exception("Failed to release weekly Duels delivery lease")
+                await asyncio.sleep(60)
 
         async def deliver_live_event_links(self) -> None:
             await self.wait_until_ready()
@@ -219,6 +256,9 @@ def create_bot(resources: ApplicationResources):
 
         async def close(self) -> None:
             try:
+                if self.weekly_duels_task is not None:
+                    self.weekly_duels_task.cancel()
+                    await asyncio.gather(self.weekly_duels_task, return_exceptions=True)
                 if self.live_event_delivery_task is not None:
                     self.live_event_delivery_task.cancel()
                 await super().close()
@@ -554,6 +594,10 @@ def create_bot(resources: ApplicationResources):
                               opponent_colors: str | None = None) -> None:
         await execute(interaction, application.matchup_report, int(interaction.user.id),
                       player=player, opponent=opponent_colors, ephemeral=True)
+
+    @bot.tree.command(name="duels-weekly", description="Team games, deck records and most frequent losses over the past seven days.")
+    async def duels_weekly(interaction: discord.Interaction) -> None:
+        await execute(interaction, application.weekly_duels_report, int(interaction.user.id), ephemeral=False)
 
     @bot.tree.command(name="duels-summary", description="Each team member's most-played colors and average mulligan size this set.")
     @app_commands.guild_only()

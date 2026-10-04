@@ -68,6 +68,7 @@ class DiscordApplication:
         practice: PracticeService | None = None,
         matchups: MatchupService | None = None,
         duels_summary: DuelsSummaryService | None = None,
+        weekly_duels=None,
     ) -> None:
         if not default_team_slug.strip():
             raise ValueError("default_team_slug must not be empty")
@@ -82,6 +83,7 @@ class DiscordApplication:
         self.practice = practice
         self.matchups = matchups
         self.duels_summary = duels_summary
+        self.weekly_duels = weekly_duels
         self.default_team_slug = default_team_slug.strip().lower()
 
     def player(self, query: str) -> DiscordResponse:
@@ -203,6 +205,16 @@ class DiscordApplication:
                 content=f"No Houston Set Championships were found for **{set_name}**."
             )
         return DiscordResponse(embeds=set_championship_views(set_name, events))
+
+    def weekly_duels_report(self, discord_user_id: int) -> DiscordResponse:
+        from lorcana.interfaces.discord.weekly_duels_views import weekly_views
+        if self.weekly_duels is None:
+            return DiscordResponse(content="Weekly Duels summaries are not configured.", ephemeral=True)
+        try:
+            report = self.weekly_duels.report(discord_user_id)
+        except ValueError as error:
+            return DiscordResponse(content=str(error), ephemeral=True)
+        return DiscordResponse(embeds=weekly_views(report))
 
     def duels_summary_report(self, discord_user_id: int) -> DiscordResponse:
         if self.duels_summary is None:

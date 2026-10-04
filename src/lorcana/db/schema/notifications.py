@@ -34,3 +34,17 @@ discord_live_event_announcements = Table(
     UniqueConstraint("event_id", "channel_id", name="uq_live_event_announcement_event_channel"),
     Index("ix_live_event_announcements_delivery", "status", "next_attempt_at"),
 )
+
+# One immutable report per team/channel/week; progress survives bot restarts.
+from sqlalchemy.dialects.postgresql import JSONB
+
+discord_weekly_duels_posts = Table(
+    "discord_weekly_duels_posts", metadata,
+    Column("team_slug", Text, primary_key=True),
+    Column("channel_id", BigInteger, primary_key=True),
+    Column("period_end", DateTime(timezone=True), primary_key=True),
+    Column("pages", JSONB, nullable=False),
+    Column("next_page", Integer, nullable=False, server_default="0"),
+    Column("lease_until", DateTime(timezone=True)),
+    Column("sent_at", DateTime(timezone=True)),
+)

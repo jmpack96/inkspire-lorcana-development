@@ -99,3 +99,14 @@ def test_openai_coach_settings_are_secret_safe_and_generation_tracks_model(tmp_p
         Settings.from_env({"OPENAI_API_KEY": "   "})
     with pytest.raises(ConfigurationError, match="OPENAI_COACH_MODEL"):
         Settings.from_env({"OPENAI_COACH_MODEL": "   "})
+
+
+def test_weekly_duels_channel_is_optional_and_configurable():
+    assert Settings.from_env({}).weekly_duels_channel_id is None
+    assert Settings.from_env({"DISCORD_WEEKLY_DUELS_CHANNEL_ID": "1554958872639184896"}).weekly_duels_channel_id == 1554958872639184896
+
+
+@pytest.mark.parametrize("value", ["", "   ", "not-an-id", "0", "-1"])
+def test_invalid_weekly_duels_channel_is_rejected(value):
+    with pytest.raises(ConfigurationError, match="DISCORD_WEEKLY_DUELS_CHANNEL_ID"):
+        Settings.from_env({"DISCORD_WEEKLY_DUELS_CHANNEL_ID": value})
