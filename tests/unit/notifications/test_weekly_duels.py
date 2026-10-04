@@ -18,7 +18,7 @@ class Service:
     calls = 0
     def report(self, **kwargs):
         self.calls += 1
-        return dict(start=kwargs["since"], end=kwargs["until"], missing=[], rows=[dict(player="Jacob", games=0, decks=[], most_losses=[], loss_count=0, unknown_losses=0)] * 100)
+        return dict(start=kwargs["since"], end=kwargs["until"], missing=[], opponent_losses=dict(colors=[], count=0, unknown=0), rows=[dict(player="Jacob", games=0, decks=[], most_losses=[], loss_count=0, unknown_losses=0)] * 300)
 
 
 def test_delivery_snapshot_lease_restart_progress_and_completion():

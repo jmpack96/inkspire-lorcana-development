@@ -22,7 +22,7 @@ def previous_weekly_boundary(end):
 
 
 def aggregate_weekly(names, results):
-    stats = {member: {"games": 0, "decks": defaultdict(Counter), "losses": Counter()}
+    stats = {member: {"games": 0, "decks": defaultdict(Counter)}
              for member in names}
     for row in results:
         if row["member_id"] not in stats:
@@ -35,19 +35,25 @@ def aggregate_weekly(names, results):
             outcome = "unknown"
         stat["games"] += count
         stat["decks"][color_pair(row["your_deck_colors"])][outcome] += count
-        if outcome == "loss":
-            stat["losses"][color_pair(row["opponent_deck_colors"])] += count
     rows = []
     for member, name in sorted(names.items(), key=lambda item: (item[1].casefold(), str(item[0]))):
         stat = stats[member]
-        known = {colors: n for colors, n in stat["losses"].items() if colors != "Unknown"}
-        most = max(known.values(), default=0)
         rows.append({"player": name, "games": stat["games"],
                      "decks": [{"colors": colors, **{k: counts[k] for k in ("win", "loss", "draw", "unknown")}}
-                               for colors, counts in sorted(stat["decks"].items())],
-                     "most_losses": sorted(c for c, n in known.items() if n == most),
-                     "loss_count": most, "unknown_losses": stat["losses"]["Unknown"]})
+                               for colors, counts in sorted(stat["decks"].items())]})
     return rows
+
+
+def team_opponent_losses(names, results):
+    """Pool losses against opponents across all members and all of their decks."""
+    losses = Counter()
+    for row in results:
+        if row["member_id"] in names and str(row["result"] or "").strip().lower() in {"loss", "lost"}:
+            losses[color_pair(row["opponent_deck_colors"])] += row["games"]
+    known = {colors: count for colors, count in losses.items() if colors != "Unknown"}
+    most = max(known.values(), default=0)
+    return {"colors": sorted(colors for colors, count in known.items() if count == most),
+            "count": most, "unknown": losses["Unknown"]}
 
 
 class WeeklyDuelsService:
@@ -75,5 +81,6 @@ class WeeklyDuelsService:
                                               until=end - timedelta(microseconds=1))
             coverage = self.repository.coverage(connection, list(names))
         return {"start": start, "end": end, "rows": aggregate_weekly(names, results),
+                "opponent_losses": team_opponent_losses(names, results),
                 "coverage": {r["member_id"]: r["last_sync"] for r in coverage},
                 "missing": [names[m] for m in names if not any(r["member_id"] == m and r["last_sync"] for r in coverage)]}

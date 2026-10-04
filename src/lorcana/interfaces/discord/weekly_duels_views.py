@@ -14,13 +14,15 @@ def weekly_views(report):
         for deck in row["decks"]:
             blocks.append(f"• {deck['colors']}: {deck['win']}-{deck['loss']}-{deck['draw']}" +
                           (f" · ? {deck['unknown']}" if deck['unknown'] else ""))
-        losses = ", ".join(row["most_losses"]) or "None with known colors"
-        blocks.append(f"Most losses across all decks: {losses}" +
-                      (f" ({row['loss_count']} each)" if row["loss_count"] else "") +
-                      (f" · {row['unknown_losses']} losses to unknown colors" if row["unknown_losses"] else ""))
         blocks.append("")
     if not blocks:
         blocks = ["No team members have a configured Duels connection."]
+    losses = report["opponent_losses"]
+    blocks.append("**Team — most losses against**")
+    blocks.append(", ".join(losses["colors"]) + f" — {losses['count']} losses each"
+                  if losses["colors"] else "No losses against known opponent colors.")
+    if losses["unknown"]:
+        blocks.append(f"Additional losses against unknown opponent colors: {losses['unknown']}")
     if report["missing"]:
         blocks += ["No completed sync: " + ", ".join(safe(n, 80) for n in report["missing"])]
     pages, pending = [], intro

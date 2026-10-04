@@ -5,7 +5,8 @@ including players with zero games. The invoking user must be linked to an active
 team member, as with `/duels-summary`. The command uses a rolling seven-day window.
 
 Each player gets their game count, W-L-D record for each color combination played,
-and the opponent combination with the largest number of losses across their decks.
+The report also shows one team-wide opponent color combination with the largest
+number of losses, pooled across every player and every deck they played.
 Ties are shown. Unknown outcomes and unknown opponent colors are identified separately.
 Deck colors describe a color grouping, not an exact deck list. All queues and team
 practice games count. Multiple accounts are deduplicated per member/game.
