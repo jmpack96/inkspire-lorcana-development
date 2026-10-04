@@ -7,7 +7,7 @@ from lorcana.interfaces.discord.views import EmbedSpec
 def weekly_views(report):
     start, end = (report[k].astimezone(WEEKLY_TIMEZONE) for k in ("start", "end"))
     intro = f"{start:%b %d, %Y %H:%M %Z} → {end:%b %d, %Y %H:%M %Z}\nAll queues, including team games; one count per player/game.\n"
-    footer = "Decks grouped by colors, not exact builds. W-L-D; ? = unknown result. Most losses = count, not loss rate. Imported history only."
+    footer = "Decks grouped by colors, not exact builds. W-L-D; ? = unknown result. Win% = W/(W+L); excludes draws and unknown results. No minimum sample. Popularity ties sorted by color name. Imported history only."
     blocks = []
     for row in report["rows"]:
         blocks.append(f"**{safe(row['player'], 80)} — {row['games']} games**")
@@ -17,12 +17,31 @@ def weekly_views(report):
         blocks.append("")
     if not blocks:
         blocks = ["No team members have a configured Duels connection."]
-    losses = report["opponent_losses"]
+    opponents = report["opponents"]
+    def record_text(record, *, percentage=False):
+        text = f"{record['colors']}: {record['win']}W–{record['loss']}L"
+        if record["draw"]:
+            text += f"–{record['draw']}D"
+        if record["unknown"]:
+            text += f" · ? {record['unknown']}"
+        if percentage:
+            text += f" · {record['win_percentage']:.1f}%"
+        return text + f" · {record['games']} games"
+
     blocks.append("**Team — most losses against**")
-    blocks.append(", ".join(losses["colors"]) + f" — {losses['count']} losses each"
-                  if losses["colors"] else "No losses against known opponent colors.")
-    if losses["unknown"]:
-        blocks.append(f"Additional losses against unknown opponent colors: {losses['unknown']}")
+    blocks.extend(record_text(record) for record in opponents["most_losses"])
+    if not opponents["most_losses"]:
+        blocks.append("No losses against known opponent colors.")
+    blocks.append("**Team — lowest win percentage against**")
+    blocks.extend(record_text(record, percentage=True) for record in opponents["worst_percentage"])
+    if not opponents["worst_percentage"]:
+        blocks.append("No wins or losses against known opponent colors.")
+    blocks.append("**Team — top 3 opponent colors by games played**")
+    blocks.extend(record_text(record) for record in opponents["popular"])
+    if not opponents["popular"]:
+        blocks.append("No games against known opponent colors.")
+    if opponents["unknown"]:
+        blocks.append("Unknown opponent colors — " + record_text(opponents["unknown"]))
     if report["missing"]:
         blocks += ["No completed sync: " + ", ".join(safe(n, 80) for n in report["missing"])]
     pages, pending = [], intro

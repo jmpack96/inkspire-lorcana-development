@@ -6,7 +6,12 @@ team member, as with `/duels-summary`. The command uses a rolling seven-day wind
 
 Each player gets their game count, W-L-D record for each color combination played,
 The report also shows one team-wide opponent color combination with the largest
-number of losses, pooled across every player and every deck they played.
+number of losses, pooled across every player and every deck they played, with the
+team W-L record. A second section shows the lowest win percentage (W/(W+L),
+excluding draws and unknown results; no minimum sample). A third section shows
+the three opponent combinations with the most games, including team W-L records.
+Popularity includes draws and unknown results; count ties sort by color name.
+Unknown opponent colors are reported separately and excluded from rankings.
 Ties are shown. Unknown outcomes and unknown opponent colors are identified separately.
 Deck colors describe a color grouping, not an exact deck list. All queues and team
 practice games count. Multiple accounts are deduplicated per member/game.

@@ -2,7 +2,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import pytest
 
-from lorcana.duels.weekly import aggregate_weekly, team_opponent_losses, latest_weekly_boundary, previous_weekly_boundary, WeeklyDuelsService
+from lorcana.duels.weekly import aggregate_weekly, team_opponent_summary, latest_weekly_boundary, previous_weekly_boundary, WeeklyDuelsService
 from lorcana.interfaces.discord.weekly_duels_views import weekly_views
 
 
@@ -72,7 +72,7 @@ def test_authorization_and_half_open_rolling_window_without_catalog():
 def test_large_team_is_paginated_without_dropping_decks():
     rows = aggregate_weekly({"a": "Jacob"}, [row(["ruby", "sapphire"], ["amber", "steel"], "loss")])
     report = dict(start=datetime.now(timezone.utc), end=datetime.now(timezone.utc),
-                  rows=rows * 100, missing=[], opponent_losses=dict(colors=["Amber/Steel"], count=1, unknown=0))
+                  rows=rows * 100, missing=[], opponents=team_opponent_summary({"a": "Jacob"}, [row(["ruby", "sapphire"], ["amber", "steel"], "loss")]))
     pages = weekly_views(report)
     assert len(pages) > 1
     assert sum(p.description.count("Ruby/Sapphire: 0-1-0") for p in pages) == 100
@@ -85,14 +85,44 @@ def test_team_losses_use_opponent_colors_across_players_and_own_decks():
                row(["amber", "steel"], ["emerald", "steel"], "win", 20),
                row(["ruby", "sapphire"], ["amethyst", "emerald"], "loss", 6),
                row(None, None, "loss", 2)]
-    losses = team_opponent_losses({"a": "Jacob", "b": "Ben"}, results)
-    assert losses == dict(colors=["Amber/Steel"], count=7, unknown=2)
+    losses = team_opponent_summary({"a": "Jacob", "b": "Ben"}, results)
+    assert [record["colors"] for record in losses["most_losses"]] == ["Amber/Steel"]
+    assert losses["most_losses"][0]["loss"] == 7
+    assert losses["unknown"]["loss"] == 2
     results.append(dict(row(None, ["amethyst", "emerald"], "loss"), member_id="b"))
-    assert team_opponent_losses({"a": "Jacob", "b": "Ben"}, results)["colors"] == ["Amber/Steel", "Amethyst/Emerald"]
+    assert [record["colors"] for record in team_opponent_summary({"a": "Jacob", "b": "Ben"}, results)["most_losses"]] == ["Amber/Steel", "Amethyst/Emerald"]
     report = dict(start=datetime.now(timezone.utc), end=datetime.now(timezone.utc),
                   rows=aggregate_weekly({"a": "Jacob", "b": "Ben"}, results),
-                  missing=[], opponent_losses=losses)
+                  missing=[], opponents=losses)
     text = "\n".join(p.description for p in weekly_views(report))
     assert text.count("Team — most losses against") == 1
-    assert "Amber/Steel — 7 losses" in text
+    assert "Amber/Steel: 0W–7L" in text
     assert "Most losses across all decks" not in text
+
+
+def test_loss_count_percentage_and_popularity_are_independent():
+    results = [row(["ruby", "sapphire"], ["amber", "steel"], "win", 10),
+               row(None, ["amber", "steel"], "loss", 8),
+               dict(row(None, ["amethyst", "emerald"], "loss", 2), member_id="b"),
+               row(None, ["ruby", "amethyst"], "draw", 25),
+               row(None, ["ruby", "steel"], None, 3),
+               row(None, None, "loss", 100)]
+    summary = team_opponent_summary({"a": "Jacob", "b": "Ben"}, results)
+    assert summary["most_losses"][0]["colors"] == "Amber/Steel"
+    assert (summary["most_losses"][0]["win"], summary["most_losses"][0]["loss"]) == (10, 8)
+    assert summary["worst_percentage"][0]["colors"] == "Amethyst/Emerald"
+    assert summary["worst_percentage"][0]["win_percentage"] == 0
+    assert [record["colors"] for record in summary["popular"]] == ["Amethyst/Ruby", "Amber/Steel", "Ruby/Steel"]
+    assert summary["popular"][0]["games"] == 25
+    assert summary["popular"][0]["win_percentage"] is None
+    assert summary["unknown"]["loss"] == 100
+    assert summary["most_losses"][0]["win_percentage"] == pytest.approx(1000 / 18)
+
+
+def test_popularity_ties_have_deterministic_three_and_percentage_ties_are_preserved():
+    results = [row(None, colors, "loss") for colors in
+               (["ruby", "steel"], ["amber", "steel"], ["emerald", "steel"], ["amethyst", "steel"])]
+    summary = team_opponent_summary({"a": "Jacob"}, results)
+    assert len(summary["popular"]) == 3
+    assert len(summary["most_losses"]) == len(summary["worst_percentage"]) == 4
+    assert [r["colors"] for r in summary["popular"]] == ["Amber/Steel", "Amethyst/Steel", "Emerald/Steel"]

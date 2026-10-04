@@ -1,5 +1,6 @@
 """Seven-day team activity, using history only and one observation per member/game."""
 from collections import Counter, defaultdict
+from fractions import Fraction
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -44,16 +45,32 @@ def aggregate_weekly(names, results):
     return rows
 
 
-def team_opponent_losses(names, results):
-    """Pool losses against opponents across all members and all of their decks."""
-    losses = Counter()
+def team_opponent_summary(names, results):
+    """Opponent records pooled across every member's decks and queues."""
+    counts = defaultdict(Counter)
     for row in results:
-        if row["member_id"] in names and str(row["result"] or "").strip().lower() in {"loss", "lost"}:
-            losses[color_pair(row["opponent_deck_colors"])] += row["games"]
-    known = {colors: count for colors, count in losses.items() if colors != "Unknown"}
-    most = max(known.values(), default=0)
-    return {"colors": sorted(colors for colors, count in known.items() if count == most),
-            "count": most, "unknown": losses["Unknown"]}
+        if row["member_id"] not in names:
+            continue
+        outcome = str(row["result"] or "").strip().lower()
+        outcome = {"won": "win", "lost": "loss", "tie": "draw"}.get(outcome, outcome)
+        if outcome not in {"win", "loss", "draw"}:
+            outcome = "unknown"
+        counts[color_pair(row["opponent_deck_colors"])][outcome] += row["games"]
+    records = []
+    for colors, count in sorted(counts.items()):
+        records.append({"colors": colors, **{k: count[k] for k in ("win", "loss", "draw", "unknown")},
+                        "games": sum(count.values()),
+                        "win_percentage": 100 * count["win"] / (count["win"] + count["loss"])
+                        if count["win"] + count["loss"] else None})
+    known = [record for record in records if record["colors"] != "Unknown"]
+    most = max((record["loss"] for record in known), default=0)
+    decided = [record for record in known if record["win"] + record["loss"]]
+    worst = min((Fraction(record["win"], record["win"] + record["loss"]) for record in decided), default=None)
+    return {"most_losses": [record for record in known if record["loss"] == most] if most else [],
+            "worst_percentage": [record for record in decided
+                if Fraction(record["win"], record["win"] + record["loss"]) == worst],
+            "popular": sorted(known, key=lambda record: (-record["games"], record["colors"]))[:3],
+            "unknown": next((record for record in records if record["colors"] == "Unknown"), None)}
 
 
 class WeeklyDuelsService:
@@ -81,6 +98,6 @@ class WeeklyDuelsService:
                                               until=end - timedelta(microseconds=1))
             coverage = self.repository.coverage(connection, list(names))
         return {"start": start, "end": end, "rows": aggregate_weekly(names, results),
-                "opponent_losses": team_opponent_losses(names, results),
+                "opponents": team_opponent_summary(names, results),
                 "coverage": {r["member_id"]: r["last_sync"] for r in coverage},
                 "missing": [names[m] for m in names if not any(r["member_id"] == m and r["last_sync"] for r in coverage)]}
