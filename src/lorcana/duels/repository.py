@@ -17,6 +17,7 @@ from lorcana.db.schema.duels import (
     duels_games,
     duels_normalizations,
     duels_replays,
+    duels_read_models,
 )
 from lorcana.duels.types import ParsedHistoryGame
 
@@ -249,9 +250,10 @@ class DuelsRepository:
             )
         ).mappings().one_or_none()
 
-    def latest_replay(self, connection: Connection, connection_id: UUID, game_id: str):
+    def latest_replay(self, connection: Connection, connection_id: UUID, game_id: str, *, include_body=True):
         return connection.execute(
-            select(duels_replays)
+            select(*([duels_replays] if include_body else [duels_replays.c.replay_id,
+                duels_replays.c.provider_replay_id, duels_replays.c.status]))
             .where(
                 duels_replays.c.connection_id == connection_id,
                 duels_replays.c.game_id == game_id,
@@ -313,9 +315,9 @@ class DuelsRepository:
         ).scalar_one()
         return existing, False
 
-    def get_normalization(self, connection: Connection, replay_id: UUID, parser_version: str):
+    def get_normalization(self, connection: Connection, replay_id: UUID, parser_version: str, *, include_body=True):
         return connection.execute(
-            select(duels_normalizations).where(
+            select(*([duels_normalizations] if include_body else [duels_normalizations.c.normalization_id])).where(
                 duels_normalizations.c.replay_id == replay_id,
                 duels_normalizations.c.parser_version == parser_version,
             )
@@ -354,6 +356,9 @@ class DuelsRepository:
         )
         created = connection.execute(statement).scalar_one_or_none()
         if created is not None:
+            from lorcana.duels.opening_projection import projection_values
+            connection.execute(insert(duels_read_models).values(
+                normalization_id=created, **projection_values(dict(normalized))))
             return created, True
         existing = connection.execute(
             select(duels_normalizations.c.normalization_id).where(
@@ -363,9 +368,9 @@ class DuelsRepository:
         ).scalar_one()
         return existing, False
 
-    def get_feature_set(self, connection: Connection, normalization_id: UUID, extractor_version: str):
+    def get_feature_set(self, connection: Connection, normalization_id: UUID, extractor_version: str, *, include_body=True):
         return connection.execute(
-            select(duels_feature_sets).where(
+            select(*([duels_feature_sets] if include_body else [duels_feature_sets.c.feature_set_id])).where(
                 duels_feature_sets.c.normalization_id == normalization_id,
                 duels_feature_sets.c.extractor_version == extractor_version,
             )
@@ -410,3 +415,21 @@ class DuelsRepository:
             )
         ).scalar_one()
         return existing, False
+
+
+    def read_model_exists(self, connection, normalization_id):
+        from lorcana.duels.opening_projection import PROJECTION_VERSION
+        return connection.scalar(select(exists().where(
+            duels_read_models.c.normalization_id == normalization_id,
+            duels_read_models.c.version == PROJECTION_VERSION)))
+
+    def stored_replay_bytes(self, connection, replay_id):
+        return connection.scalar(select(duels_replays.c.compressed_bytes).where(
+            duels_replays.c.replay_id == replay_id))
+
+    def store_read_model(self, connection, normalization_id, normalized):
+        from lorcana.duels.opening_projection import projection_values
+        values = projection_values(normalized)
+        statement = insert(duels_read_models).values(normalization_id=normalization_id, **values)
+        connection.execute(statement.on_conflict_do_update(
+            index_elements=[duels_read_models.c.normalization_id], set_=values))

@@ -13,7 +13,7 @@ def test_foundation_tables_are_registered():
         "members", "teams", "team_memberships", "member_playhub_links", "discord_accounts",
         "jobs", "job_attempts", "scheduled_jobs",
         "duels_connections", "duels_games", "duels_game_observations",
-        "duels_replays", "duels_normalizations", "duels_feature_sets",
+        "duels_replays", "duels_normalizations", "duels_feature_sets", "duels_read_models",
         "catalog_snapshots", "catalog_cards",
         "decklists", "decklist_cards", "coach_analysis_runs", "coach_findings", "coach_reports",
         "discord_command_usage",

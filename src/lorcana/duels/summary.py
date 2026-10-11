@@ -1,44 +1,20 @@
 """Team Duels summary from history and compact, member-owned opening evidence."""
 from collections import Counter, defaultdict
+from lorcana.duels.opening_projection import validated_mulligan, PROJECTION_VERSION
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, true
+from sqlalchemy import select
 
 from lorcana.cache import ReadCache
 from lorcana.db.schema.duels import (
     duels_connections as accounts, duels_games as games,
     duels_game_observations as observations, duels_normalizations as normalizations,
-    duels_replays as replays,
+    duels_replays as replays, duels_read_models as read_models,
 )
 from lorcana.duels.matchups import MatchupRepository, color_pair, current_set
 from lorcana.duels.replay_parser import PARSER_VERSION
 
 
-def validated_mulligan(evidence):
-    """Missing, inconsistent, or warned opening evidence is not a zero."""
-    if not isinstance(evidence, dict) or evidence.get("parser_warnings"):
-        return None
-    game = evidence.get("game") or {}
-    if not isinstance(game, dict) or game.get("perspective") is None:
-        return None
-    names = game.get("player_names") or {}
-    if names and len(names) != 2:
-        return None
-    initial = evidence.get("starting_hand")
-    mulligan = evidence.get("mulligan")
-    if not isinstance(mulligan, dict):
-        return None
-    kept, sent, drawn = (mulligan.get(k) for k in ("kept", "sent_back", "drawn"))
-    count = mulligan.get("count")
-    if not (type(count) is int and 0 <= count <= 7
-            and all(isinstance(group, list) and
-                    all(isinstance(card, dict) and isinstance(card.get("id"), str) and card["id"]
-                        for card in group) for group in (initial, kept, sent, drawn))):
-        return None
-    if not (len(initial) == 7 and len(sent) == len(drawn) == count and len(kept) + count == 7
-            and Counter(c["id"] for c in initial) == Counter(c["id"] for c in kept + sent)):
-        return None
-    return count
 
 
 class DuelsSummaryRepository(MatchupRepository):
@@ -53,21 +29,29 @@ class DuelsSummaryRepository(MatchupRepository):
         ).distinct(accounts.c.member_id, observations.c.game_id).order_by(
             accounts.c.member_id, observations.c.game_id,
             observations.c.last_seen_at.desc(), observations.c.connection_id,
-        ).subquery()
-        # Fetch only opening evidence, not full replays/actions/private hands for display.
-        opening = select(func.jsonb_build_object(
-            "game", normalizations.c.normalized["game"],
-            "starting_hand", normalizations.c.normalized["starting_hand"],
-            "mulligan", normalizations.c.normalized["mulligan"],
-            "parser_warnings", normalizations.c.normalized["parser_warnings"],
-        ).label("evidence")).select_from(replays.join(normalizations)).where(
-            replays.c.game_id == latest.c.game_id,
-            replays.c.connection_id == latest.c.connection_id,
+        ).cte("latest_observations")
+        # Pick the latest valid source first. A missing projection stays unknown;
+        # never substitute an older replay or fetch the giant JSON as a fallback.
+        source = select(
+            latest.c.member_id, latest.c.game_id, normalizations.c.normalization_id,
+        ).select_from(latest.join(replays,
+            (replays.c.game_id == latest.c.game_id) &
+            (replays.c.connection_id == latest.c.connection_id)).join(normalizations)).where(
             replays.c.status == "valid", normalizations.c.status == "valid",
             normalizations.c.parser_version == PARSER_VERSION,
-        ).order_by(replays.c.fetched_at.desc(), normalizations.c.created_at.desc(),
-                   normalizations.c.normalization_id).limit(1).lateral()
-        query = select(latest, opening.c.evidence).select_from(latest.outerjoin(opening, true()))
+        ).distinct(latest.c.member_id, latest.c.game_id).order_by(
+            latest.c.member_id, latest.c.game_id, replays.c.fetched_at.desc(),
+            normalizations.c.created_at.desc(), normalizations.c.normalization_id,
+        ).subquery()
+        compact = source.outerjoin(read_models,
+            (read_models.c.normalization_id == source.c.normalization_id) &
+            (read_models.c.version == PROJECTION_VERSION))
+        counts = select(source.c.member_id, source.c.game_id,
+                        read_models.c.mulligan_count,
+                        read_models.c.normalization_id.is_(None).label("projection_pending")
+                        ).select_from(compact).subquery()
+        query = select(latest, counts.c.mulligan_count, counts.c.projection_pending).select_from(latest.outerjoin(counts,
+            (counts.c.member_id == latest.c.member_id) & (counts.c.game_id == latest.c.game_id)))
         # Stream the complete period in batches; no arbitrary history/replay cap.
         return connection.execution_options(yield_per=500).execute(query).mappings()
 
@@ -106,6 +90,7 @@ class DuelsSummaryService:
             catalog = self.repository.catalog(connection)
             period = current_set(catalog["metadata_json"] if catalog else {}, now)
             coverage = self.repository.coverage(connection, list(names))
+            pending = 0
             stats = defaultdict(lambda: {"games": 0, "colors": Counter(), "mulligan_sum": 0, "sample": 0})
             for row in self.repository.history(connection, member_ids=list(names),
                                                since=period["start"], until=now):
@@ -114,10 +99,11 @@ class DuelsSummaryService:
                     continue
                 stat = stats[member]
                 stat["games"] += 1
+                pending += bool(row.get("projection_pending"))
                 colors = color_pair(row["your_deck_colors"])
                 if colors != "Unknown":
                     stat["colors"][colors] += 1
-                mulligan = validated_mulligan(row["evidence"])
+                mulligan = row["mulligan_count"]
                 if mulligan is not None:
                     stat["mulligan_sum"] += mulligan
                     stat["sample"] += 1
@@ -132,4 +118,4 @@ class DuelsSummaryService:
                          "sample": stat["sample"]})
         synced = {r["member_id"] for r in coverage if r["last_sync"] is not None}
         return {"period": period, "rows": rows, "catalog_updated": catalog["imported_at"],
-                "synced": len(set(names) & synced), "members": len(names)}
+                "synced": len(set(names) & synced), "members": len(names), "projection_pending": pending}

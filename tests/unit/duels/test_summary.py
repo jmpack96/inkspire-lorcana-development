@@ -81,7 +81,7 @@ class Repository:
 
     def row(self, colors=None, opening=None, member=None):
         return {"member_id": member or self.a, "your_deck_colors": colors,
-                "evidence": opening}
+                "mulligan_count": validated_mulligan(opening)}
 
 
 def service(repo):
@@ -198,3 +198,15 @@ def test_cached_summary_rechecks_permissions_and_roster_and_refreshes():
     svc._cache.expires = 0
     svc.report(456)
     assert len(r.calls) == 3
+
+
+def test_pending_projection_is_reported_without_counting_as_zero():
+    r = Repository()
+    row = r.row(['ruby', 'sapphire'])
+    row['projection_pending'] = True
+    r.rows = [row]
+    report = service(r).report(123)
+    assert report['projection_pending'] == 1
+    assert report['rows'][0]['sample'] == 0
+    assert report['rows'][0]['mulligan_average'] is None
+    assert 'averages are partial' in summary_views(report)[0].description

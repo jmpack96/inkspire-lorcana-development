@@ -12,6 +12,8 @@ def summary_views(report):
               "Sample = validated mulligans / all games. Average includes zero-card mulligans; "
               "missing or invalid evidence excluded. Colors are not exact deck builds. "
               f"Catalog updated {report['catalog_updated']:%Y-%m-%d}.")
+    if report.get("projection_pending"):
+        intro += f"\nMulligan averages are partial: {report['projection_pending']} games await evidence preparation."
     if not report["rows"]:
         return (EmbedSpec("Team Duels summary", intro + "\nNo team members have a configured Duels connection.", footer=footer),)
     def page(rows):

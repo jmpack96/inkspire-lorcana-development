@@ -506,24 +506,14 @@ class RatingRepository:
     def player_rank_stats(
         self, connection: Connection, rating_run_id: UUID, rating: float
     ) -> tuple[int, int, int]:
-        total = connection.execute(
-            select(func.count()).select_from(rating_current).where(
-                rating_current.c.rating_run_id == rating_run_id
-            )
-        ).scalar_one()
-        above = connection.execute(
-            select(func.count()).select_from(rating_current).where(
-                rating_current.c.rating_run_id == rating_run_id,
-                rating_current.c.rating > rating,
-            )
-        ).scalar_one()
-        below = connection.execute(
-            select(func.count()).select_from(rating_current).where(
-                rating_current.c.rating_run_id == rating_run_id,
-                rating_current.c.rating < rating,
-            )
-        ).scalar_one()
-        return int(total), int(above), int(below)
+        counts = connection.execute(select(
+            func.count().label("total"),
+            func.count().filter(rating_current.c.rating > rating).label("above"),
+            func.count().filter(rating_current.c.rating < rating).label("below"),
+        ).select_from(rating_current).where(
+            rating_current.c.rating_run_id == rating_run_id,
+        )).mappings().one()
+        return int(counts["total"]), int(counts["above"]), int(counts["below"])
 
     def player_tournament_history(
         self,

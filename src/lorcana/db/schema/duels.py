@@ -162,3 +162,15 @@ duels_feature_sets = Table(
 Index("ix_duels_replays_summary", duels_replays.c.connection_id,
       duels_replays.c.game_id, duels_replays.c.fetched_at.desc(),
       postgresql_where=duels_replays.c.status == "valid")
+
+
+# Avoid de-TOASTing full replay JSON for summaries and practice commands.
+duels_read_models = Table(
+    "duels_read_models", metadata,
+    Column("normalization_id", Uuid, ForeignKey("duels_normalizations.normalization_id", ondelete="CASCADE"), primary_key=True),
+    Column("version", Integer, nullable=False),
+    Column("mulligan_count", Integer),
+    Column("decklist", JSONB),
+    Column("opening_evidence", JSONB, nullable=False),
+    CheckConstraint("mulligan_count IS NULL OR mulligan_count BETWEEN 0 AND 7", name="duels_read_models_mulligan_count"),
+)

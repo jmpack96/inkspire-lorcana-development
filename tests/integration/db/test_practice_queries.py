@@ -30,6 +30,9 @@ def test_practice_is_private_deduplicated_and_keeps_history_only_games(db_engine
         from datetime import timedelta
         c.execute(duels_replays.insert(), [dict(replay_id=r, connection_id=a, game_id=g, fetched_at=now - timedelta(days=age), source_sha256=str(r), content_encoding="identity", compressed_bytes=b"{}", compressed_size=2, status="valid") for r, a, g, age in ((replay_id, account, game, 0), (older_replay, account, game, 1), (foreign_replay, foreign, secret, 0))])
         c.execute(duels_normalizations.insert(), [dict(normalization_id=n, replay_id=r, parser_version=PARSER_VERSION, schema_version=1, normalized={"decklist": [card] * 60, "mulligan": {"count": 1 if card == "1-1" else 2}}, normalized_sha256=str(n), warnings=[], status="valid", created_at=now) for n, r, card in ((norm, replay_id, "1-1"), (old_norm, older_replay, "2-2"), (foreign_norm, foreign_replay, "3-3"))])
+    from lorcana.duels.backfill_read_models import backfill_batch
+    assert backfill_batch(db_engine, batch_size=25)["processed"] == 3
+    assert backfill_batch(db_engine, batch_size=25)["processed"] == 0
     try:
         report = PracticeService.from_engine(db_engine).report(owner)
         assert {r["game_id"] for r in report["rows"]} == {game, missing}
@@ -53,9 +56,10 @@ def test_practice_is_private_deduplicated_and_keeps_history_only_games(db_engine
                 c, member_ids=[owner], since=now - timedelta(days=1), until=now))
             assert len(summary) == 2  # duplicate accounts and foreign member excluded
             selected = next(r for r in summary if r["game_id"] == game)
-            assert selected["evidence"]["mulligan"]["count"] == 1  # latest own replay
-            assert "decklist" not in selected["evidence"] and "effective_actions" not in selected["evidence"]
-            assert next(r for r in summary if r["game_id"] == missing)["evidence"] is None
+            # Invalid opening evidence is not silently interpreted as a count.
+            assert selected["mulligan_count"] is None
+            assert selected["projection_pending"] is False
+            assert next(r for r in summary if r["game_id"] == missing)["mulligan_count"] is None
         with db_engine.begin() as c:
             c.execute(duels_game_observations.insert().values(connection_id=foreign, game_id=game,
                 result="loss", provider_payload={}, first_seen_at=now, last_seen_at=now))

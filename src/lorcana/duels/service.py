@@ -280,15 +280,16 @@ class DuelsService:
 
     def _existing_complete(self, replay_id: UUID) -> ReplayProcessingResult | None:
         with self.read_connection_factory() as connection:
-            normalization = self.repository.get_normalization(connection, replay_id, PARSER_VERSION)
+            normalization = self.repository.get_normalization(connection, replay_id, PARSER_VERSION, include_body=False)
             if normalization is None:
                 return None
             feature = self.repository.get_feature_set(
                 connection,
                 normalization["normalization_id"],
                 FEATURE_EXTRACTOR_VERSION,
+                include_body=False,
             )
-            if feature is None:
+            if feature is None or not self.repository.read_model_exists(connection, normalization["normalization_id"]):
                 return None
         return ReplayProcessingResult(
             replay_id=replay_id,
@@ -309,7 +310,7 @@ class DuelsService:
         with self.read_connection_factory() as connection:
             linked = self.repository.get_connection(connection, connection_id)
             observation = self.repository.get_observation(connection, connection_id, game_id)
-            latest = self.repository.latest_replay(connection, connection_id, game_id)
+            latest = self.repository.latest_replay(connection, connection_id, game_id, include_body=False)
         if linked is None:
             raise DuelsServiceError(f"Duels connection {connection_id} does not exist")
         if observation is None:
@@ -332,7 +333,8 @@ class DuelsService:
                 return complete
             # A prior attempt safely stored raw evidence but failed later. Resume
             # from those immutable bytes rather than losing work or refetching.
-            source_bytes = bytes(latest["compressed_bytes"])
+            with self.read_connection_factory() as connection:
+                source_bytes = bytes(self.repository.stored_replay_bytes(connection, latest["replay_id"]))
             replay_id = latest["replay_id"]
         else:
             try:
@@ -413,10 +415,12 @@ class DuelsService:
             normalization_id = existing_normalization["normalization_id"]
             normalization_created = False
             normalized = dict(existing_normalization["normalized"])
+            with self.transaction_factory() as connection:
+                self.repository.store_read_model(connection, normalization_id, normalized)
 
         with self.read_connection_factory() as connection:
             existing_features = self.repository.get_feature_set(
-                connection, normalization_id, FEATURE_EXTRACTOR_VERSION
+                connection, normalization_id, FEATURE_EXTRACTOR_VERSION, include_body=False
             )
         if existing_features is None:
             features = extract_features(normalized)
