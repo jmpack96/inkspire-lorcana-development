@@ -92,10 +92,10 @@ def default_platform_schedules() -> tuple[ScheduleDefinition, ...]:
         ScheduleDefinition(
             name="maintenance-prune-jobs",
             kind=MAINTENANCE_PRUNE_JOBS,
-            schedule_spec={"type": "daily", "hour": 6, "minute": 30, "timezone": "UTC"},
+            schedule_spec={"type": "interval", "seconds": 60 * 60},
             payload={"retention_days": 30, "limit": 5_000},
             resource_key="jobs",
-            priority=1,
+            priority=16,
             max_attempts=3,
         ),
         ScheduleDefinition(

@@ -37,6 +37,8 @@ def test_default_schedules_cover_shared_production_pipeline_without_account_spec
     assert definitions["catalog-lorcast-daily"].kind == CATALOG_REFRESH_LORCAST
     assert definitions["maintenance-prune-jobs"].kind == MAINTENANCE_PRUNE_JOBS
     assert definitions["maintenance-prune-jobs"].payload["retention_days"] == 30
+    assert definitions["maintenance-prune-jobs"].schedule_spec == {"type": "interval", "seconds": 3600}
+    assert definitions["maintenance-prune-jobs"].priority > 15
     assert definitions["discord-scan-live-events"].kind == DISCORD_SCAN_LIVE_EVENTS
     assert definitions["discord-scan-live-events"].schedule_spec == {
         "type": "interval",

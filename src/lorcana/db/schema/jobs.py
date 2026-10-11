@@ -54,6 +54,14 @@ jobs = Table(
 )
 
 
+Index("ix_jobs_queued_order", jobs.c.priority.desc(), jobs.c.available_at,
+      jobs.c.created_at, jobs.c.job_id, postgresql_where=jobs.c.status == "queued")
+Index("ix_jobs_running_expiry", jobs.c.lease_expires_at,
+      postgresql_where=jobs.c.status == "running")
+Index("ix_jobs_terminal_cleanup", jobs.c.completed_at, jobs.c.job_id,
+      postgresql_where=jobs.c.status.in_(["succeeded", "failed", "cancelled"]))
+
+
 job_attempts = Table(
     "job_attempts",
     metadata,

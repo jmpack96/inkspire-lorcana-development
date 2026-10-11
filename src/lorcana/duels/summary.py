@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import func, select, true
 
+from lorcana.cache import ReadCache
 from lorcana.db.schema.duels import (
     duels_connections as accounts, duels_games as games,
     duels_game_observations as observations, duels_normalizations as normalizations,
@@ -74,6 +75,7 @@ class DuelsSummaryRepository(MatchupRepository):
 class DuelsSummaryService:
     def __init__(self, *, repository, connection_factory, team_slug,
                  clock=lambda: datetime.now(timezone.utc)):
+        self._cache = ReadCache()
         self.repository, self.connection_factory = repository, connection_factory
         self.team_slug, self.clock = team_slug, clock
 
@@ -83,6 +85,16 @@ class DuelsSummaryService:
                    team_slug=team_slug)
 
     def report(self, viewer_id):
+        # Authorization stays live even when another member populated the cache.
+        with self.connection_factory() as connection:
+            roster = self.repository.roster(connection, self.team_slug)
+            if self.repository.viewer(connection, viewer_id) not in {r["member_id"] for r in roster}:
+                raise ValueError("Link your Discord account to an active member of this team to view Duels summaries.")
+            configured = self.repository.roster(connection, self.team_slug, duels_only=True)
+        key = tuple(sorted((str(r["member_id"]), r["preferred_display_name"]) for r in configured))
+        return self._cache.get((self.clock().date(), key), lambda: self._report(viewer_id))
+
+    def _report(self, viewer_id):
         now = self.clock()
         with self.connection_factory() as connection:
             roster = self.repository.roster(connection, self.team_slug)

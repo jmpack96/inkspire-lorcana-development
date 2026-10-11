@@ -176,3 +176,25 @@ def test_summary_twenty_rows_per_page_and_early_split_for_long_ties():
     for page in pages:
         assert len(page.description) <= 4096
         assert len(page.title) + len(page.description) + len(page.footer) < 6000
+
+
+def test_cached_summary_rechecks_permissions_and_roster_and_refreshes():
+    r = Repository()
+    svc = service(r)
+    first = svc.report(123)
+    first["rows"][0]["player"] = "mutated"
+    assert svc.report(123)["rows"][0]["player"] != "mutated"
+    assert len(r.calls) == 1
+    r.viewer_id = None
+    with pytest.raises(ValueError, match="active member"):
+        svc.report(999)
+    assert len(r.calls) == 1
+    r.viewer_id = r.b
+    svc.report(456)
+    assert len(r.calls) == 1
+    r.duels_members = {r.a}
+    assert svc.report(456)["members"] == 1
+    assert len(r.calls) == 2
+    svc._cache.expires = 0
+    svc.report(456)
+    assert len(r.calls) == 3

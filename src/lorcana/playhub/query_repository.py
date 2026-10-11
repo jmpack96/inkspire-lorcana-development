@@ -25,14 +25,18 @@ class PlayHubQueryRepository:
                 statement = statement.where(condition)
             return int(connection.execute(statement).scalar_one())
 
+        # All match categories share one scan and one snapshot.
+        match_counts = connection.execute(select(
+            func.count().label("matches"),
+            func.count().filter(playhub_matches.c.participant_count == 2).label("two_player_matches"),
+            func.count().filter(playhub_matches.c.participant_count > 2).label("multiplayer_matches"),
+            func.count().filter(playhub_matches.c.participant_count.is_(None)).label("unknown_participants"),
+        ).select_from(playhub_matches)).mappings().one()
         return {
             "events": count(playhub_events),
             "stores": count(playhub_stores),
             "players": count(playhub_players),
-            "matches": count(playhub_matches),
-            "two_player_matches": count(playhub_matches, playhub_matches.c.participant_count == 2),
-            "multiplayer_matches": count(playhub_matches, playhub_matches.c.participant_count > 2),
-            "unknown_participants": count(playhub_matches, playhub_matches.c.participant_count.is_(None)),
+            **{key: int(value) for key, value in match_counts.items()},
         }
 
     def latest_import(self, connection: Connection):

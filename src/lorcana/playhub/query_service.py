@@ -10,6 +10,7 @@ from uuid import UUID
 
 from sqlalchemy.engine import Connection, Engine
 
+from lorcana.cache import ReadCache
 from lorcana.playhub.query_repository import PlayHubQueryRepository
 
 ConnectionFactory = Callable[[], ContextManager[Connection]]
@@ -66,6 +67,7 @@ class TeamEvent:
 
 class PlayHubQueryService:
     def __init__(self, *, repository: PlayHubQueryRepository, connection_factory: ConnectionFactory):
+        self._status_cache = ReadCache()
         self.repository = repository
         self.connection_factory = connection_factory
 
@@ -74,6 +76,9 @@ class PlayHubQueryService:
         return cls(repository=repository or PlayHubQueryRepository(), connection_factory=engine.connect)
 
     def database_status(self) -> DatabaseStatus:
+        return self._status_cache.get("status", self._database_status)
+
+    def _database_status(self) -> DatabaseStatus:
         with self.connection_factory() as connection:
             counts = self.repository.database_counts(connection)
             latest = self.repository.latest_import(connection)

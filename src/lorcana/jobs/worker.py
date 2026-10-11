@@ -85,12 +85,19 @@ class Worker:
         self.scheduler = scheduler
 
     def run_once(self) -> bool:
+        started = time.perf_counter()
         if self.scheduler is not None:
             try:
                 self.scheduler.enqueue_due(limit=25)
             except Exception:
                 logger.exception("Failed to materialize due scheduled jobs")
+        scheduled = time.perf_counter()
         lease = self.queue.claim(self.worker_id)
+        claimed = time.perf_counter()
+        if claimed - started >= 1:
+            logger.info("Queue timing worker=%s schedule_ms=%.0f claim_ms=%.0f claimed=%s",
+                        self.worker_id, (scheduled - started) * 1000,
+                        (claimed - scheduled) * 1000, lease is not None)
         if lease is None:
             return False
         logger.info(
@@ -109,7 +116,8 @@ class Worker:
                     f"Heartbeat failed for job {lease.job_id}: {heartbeat.error}"
                 )
             self.queue.succeed(lease, progress=progress)
-            logger.info("Completed job %s kind=%s", lease.job_id, lease.kind)
+            logger.info("Completed job %s kind=%s execution_ms=%.0f",
+                        lease.job_id, lease.kind, (time.perf_counter() - claimed) * 1000)
         except JobLeaseLostError:
             logger.exception("Lease lost for job %s; refusing stale completion", lease.job_id)
         except PermanentJobError as error:

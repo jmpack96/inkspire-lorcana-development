@@ -157,3 +157,8 @@ duels_feature_sets = Table(
     ),
     Index("ix_duels_feature_sets_normalization_id", "normalization_id"),
 )
+
+
+Index("ix_duels_replays_summary", duels_replays.c.connection_id,
+      duels_replays.c.game_id, duels_replays.c.fetched_at.desc(),
+      postgresql_where=duels_replays.c.status == "valid")
