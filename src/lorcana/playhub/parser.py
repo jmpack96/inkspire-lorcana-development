@@ -339,7 +339,7 @@ def select_discovered_events(
     start_datetime: datetime,
     end_datetime: datetime,
 ) -> "DiscoverySelection":
-    """Validate a discovery window, exclude the API's inclusive end boundary, and dedupe IDs."""
+    """Validate a discovery window, filter rows outside the requested UTC interval, and dedupe IDs."""
     from lorcana.playhub.types import DiscoverySelection
 
     if start_datetime.tzinfo is None or start_datetime.utcoffset() is None:
@@ -368,14 +368,9 @@ def select_discovered_events(
         if event_start is None:
             missing_datetime += 1
             continue
-        if event_start == end:
+        if not start <= event_start < end:
             boundary_excluded += 1
             continue
-        if event_start < start or event_start > end:
-            raise PlayHubParseError(
-                f"Play Hub returned event {event_id} at {event_start.isoformat()} outside "
-                f"requested window [{start.isoformat()}, {end.isoformat()})"
-            )
         if event_id in seen_ids:
             duplicates += 1
             continue

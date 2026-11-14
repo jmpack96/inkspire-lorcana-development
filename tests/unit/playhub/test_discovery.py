@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 
-from lorcana.playhub.parser import PlayHubParseError, select_discovered_events
+from lorcana.playhub.parser import select_discovered_events
 from lorcana.playhub.service import PlayHubDiscoveryService
 
 NOW = datetime(2026, 9, 13, 20, 0, tzinfo=timezone.utc)
@@ -64,13 +64,18 @@ def test_discovery_window_dedupes_and_excludes_inclusive_end_boundary():
     assert selection.missing_id == 1
 
 
-def test_discovery_window_rejects_truly_out_of_range_event():
-    with pytest.raises(PlayHubParseError, match="outside requested window"):
-        select_discovered_events(
-            [event(1, "2026-09-15T00:00:00Z")],
-            start_datetime=datetime(2026, 9, 13, tzinfo=timezone.utc),
-            end_datetime=datetime(2026, 9, 14, tzinfo=timezone.utc),
-        )
+def test_discovery_window_keeps_valid_events_among_out_of_range_rows():
+    selection = select_discovered_events(
+        [
+            event(1, "2026-09-12T17:40:00Z"),
+            event(2, "2026-09-13T00:00:00Z"),
+            event(3, "2026-09-15T00:00:00Z"),
+        ],
+        start_datetime=datetime(2026, 9, 13, tzinfo=timezone.utc),
+        end_datetime=datetime(2026, 9, 14, tzinfo=timezone.utc),
+    )
+    assert [row["id"] for row in selection.events] == [2]
+    assert selection.boundary_excluded == 2
 
 
 class FakeClient:
