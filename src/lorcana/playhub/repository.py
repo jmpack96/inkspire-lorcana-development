@@ -5,10 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import String, and_, cast, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import Connection
 
+from lorcana.db.schema.jobs import active_playhub_import, jobs
 from lorcana.db.schema.playhub import (
     playhub_discovery_runs,
     playhub_event_sync_state,
@@ -364,6 +365,10 @@ class PlayHubRepository:
                 )
             )
             .where(
+                ~select(jobs.c.job_id).where(
+                    active_playhub_import,
+                    jobs.c.resource_key == cast(playhub_events.c.event_id, String),
+                ).exists(),
                 playhub_events.c.start_datetime.is_not(None),
                 playhub_events.c.start_datetime >= lookback_start,
                 playhub_events.c.start_datetime <= now,

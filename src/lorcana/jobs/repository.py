@@ -10,7 +10,7 @@ from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import Connection
 
-from lorcana.db.schema.jobs import job_attempts, jobs
+from lorcana.db.schema.jobs import active_playhub_import, job_attempts, jobs
 
 
 class JobRepository:
@@ -28,6 +28,8 @@ class JobRepository:
         available_at: datetime,
         created_at: datetime,
     ) -> tuple[UUID, bool]:
+        if kind == "playhub.import_event":
+            resource_key = str(int(payload["event_id"]))
         values = dict(
             job_id=job_id,
             kind=kind,
@@ -42,6 +44,25 @@ class JobRepository:
             created_at=created_at,
             updated_at=created_at,
         )
+        if kind == "playhub.import_event":
+            active_job = active_playhub_import & (jobs.c.resource_key == resource_key)
+            statement = insert(jobs).values(**values).on_conflict_do_nothing()
+            while True:
+                created = connection.execute(
+                    statement.returning(jobs.c.job_id)
+                ).scalar_one_or_none()
+                if created is not None:
+                    return created, True
+                # The active job can finish between the insert and this read.
+                existing = connection.execute(
+                    select(jobs.c.job_id).where(
+                        or_(active_job, jobs.c.idempotency_key == idempotency_key)
+                        if idempotency_key is not None else active_job
+                    ).limit(1)
+                ).scalar_one_or_none()
+                if existing is not None:
+                    return existing, False
+
         if idempotency_key is None:
             connection.execute(jobs.insert().values(**values))
             return job_id, True

@@ -62,6 +62,17 @@ Index("ix_jobs_terminal_cleanup", jobs.c.completed_at, jobs.c.job_id,
       postgresql_where=jobs.c.status.in_(["succeeded", "failed", "cancelled"]))
 
 
+active_playhub_import = (jobs.c.kind == "playhub.import_event") & jobs.c.status.in_(
+    ["queued", "running"]
+)
+Index(
+    "uq_jobs_active_playhub_import",
+    jobs.c.resource_key,
+    unique=True,
+    postgresql_where=active_playhub_import,
+)
+
+
 job_attempts = Table(
     "job_attempts",
     metadata,
