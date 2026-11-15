@@ -45,6 +45,7 @@ class Settings:
     discord_team_slug: str = "inkspire"
     live_event_channel_id: int | None = None
     weekly_duels_channel_id: int | None = None
+    weekly_leaderboard_channel_id: int | None = None
     coach_analyzer_name: str | None = None
     coach_analyzer_generation: str = "v1"
     coach_rules_bundle: Path | None = None
@@ -99,6 +100,21 @@ class Settings:
                 raise ConfigurationError(
                     "DISCORD_WEEKLY_DUELS_CHANNEL_ID must be a positive Discord channel ID"
                 )
+
+        raw_leaderboard_channel = source.get("LORCANA_WEEKLY_LEADERBOARD_CHANNEL_ID")
+        weekly_leaderboard_channel_id = None
+        if raw_leaderboard_channel is not None:
+            try:
+                weekly_leaderboard_channel_id = int(raw_leaderboard_channel)
+            except ValueError as error:
+                raise ConfigurationError(
+                    "LORCANA_WEEKLY_LEADERBOARD_CHANNEL_ID must be a positive Discord channel ID"
+                ) from error
+            if weekly_leaderboard_channel_id <= 0:
+                raise ConfigurationError(
+                    "LORCANA_WEEKLY_LEADERBOARD_CHANNEL_ID must be a positive Discord channel ID"
+                )
+
         raw_coach_name = source.get("LORCANA_COACH_ANALYZER")
         coach_analyzer_name = None if raw_coach_name is None else raw_coach_name.strip().lower()
         if raw_coach_name is not None and not coach_analyzer_name:
@@ -126,6 +142,7 @@ class Settings:
             discord_team_slug=discord_team_slug,
             live_event_channel_id=live_event_channel_id,
             weekly_duels_channel_id=weekly_duels_channel_id,
+            weekly_leaderboard_channel_id=weekly_leaderboard_channel_id,
             coach_analyzer_name=coach_analyzer_name,
             coach_analyzer_generation=coach_analyzer_generation,
             coach_rules_bundle=Path(source["LORCANA_COACH_RULES_BUNDLE"]) if source.get("LORCANA_COACH_RULES_BUNDLE") else None,

@@ -9,6 +9,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from lorcana.notifications.weekly_leaderboard import WeeklyLeaderboardDelivery
 from lorcana.analytics.service import DiscordUsageService
 from lorcana.bootstrap import ApplicationResources
 from lorcana.identity.query_service import IdentityQueryService
@@ -142,19 +143,55 @@ def create_bot(resources: ApplicationResources):
         jobs=JobQueue.from_engine(resources.engine),
     )
 
+    weekly_channel_id = getattr(resources.settings, "weekly_leaderboard_channel_id", None)
+    weekly_delivery = WeeklyLeaderboardDelivery(
+        resources.engine,
+        team_slug=resources.settings.discord_team_slug,
+        channel_id=weekly_channel_id,
+    ) if weekly_channel_id is not None else None
+
     class LorcanaBot(discord.Client):
         def __init__(self) -> None:
             super().__init__(intents=discord.Intents.default())
             self.tree = app_commands.CommandTree(self)
+            self.weekly_leaderboard_task: asyncio.Task | None = None
             self.live_event_delivery_task: asyncio.Task | None = None
 
         async def setup_hook(self) -> None:
             synced = await self.tree.sync()
             logger.info("Synced %d Discord slash commands", len(synced))
+            if weekly_delivery is not None:
+                self.weekly_leaderboard_task = asyncio.create_task(
+                    self.deliver_weekly_leaderboard()
+                )
             if getattr(resources.settings, "live_event_channel_id", None) is not None:
                 self.live_event_delivery_task = asyncio.create_task(
                     self.deliver_live_event_links()
                 )
+
+        async def deliver_weekly_leaderboard(self) -> None:
+            await self.wait_until_ready()
+            while not self.is_closed():
+                try:
+                    claim = await asyncio.to_thread(weekly_delivery.claim)
+                    if claim is not None:
+                        sent = False
+                        try:
+                            response = await asyncio.to_thread(application.team_leaderboard)
+                            channel = await self.fetch_channel(weekly_channel_id)
+                            await asyncio.wait_for(
+                                channel.send(
+                                    embeds=[_to_discord_embed(discord, spec) for spec in response.embeds],
+                                    allowed_mentions=discord.AllowedMentions.none(),
+                                ),
+                                timeout=60,
+                            )
+                            sent = True
+                        finally:
+                            await asyncio.to_thread(weekly_delivery.finish, claim, sent=sent)
+                except Exception:
+                    logger.exception("Failed to deliver weekly team leaderboard")
+                await asyncio.sleep(60)
 
         async def deliver_live_event_links(self) -> None:
             await self.wait_until_ready()
@@ -198,6 +235,9 @@ def create_bot(resources: ApplicationResources):
 
         async def close(self) -> None:
             try:
+                if self.weekly_leaderboard_task is not None:
+                    self.weekly_leaderboard_task.cancel()
+                    await asyncio.gather(self.weekly_leaderboard_task, return_exceptions=True)
                 if self.live_event_delivery_task is not None:
                     self.live_event_delivery_task.cancel()
                 await super().close()

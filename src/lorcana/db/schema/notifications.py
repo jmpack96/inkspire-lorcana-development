@@ -48,3 +48,14 @@ discord_weekly_duels_posts = Table(
     Column("lease_until", DateTime(timezone=True)),
     Column("sent_at", DateTime(timezone=True)),
 )
+
+
+discord_weekly_leaderboard_posts = Table(
+    "discord_weekly_leaderboard_posts",
+    metadata,
+    Column("team_slug", Text, primary_key=True),
+    Column("channel_id", BigInteger, primary_key=True),
+    Column("scheduled_at", DateTime(timezone=True), primary_key=True),
+    Column("lease_until", DateTime(timezone=True)),
+    Column("sent_at", DateTime(timezone=True)),
+)
